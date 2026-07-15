@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b4f8a">
+  <title>Portal Territorial San Cristóbal</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="portal-page">
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-mark">SC</div>
+      <div>
+        <h1 data-app-name>Portal Territorial</h1>
+        <p>Carpetas territoriales · San Cristóbal</p>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <button id="change-password" class="button ghost small" type="button">Cambiar contraseña</button>
+      <div class="user-chip">
+        <strong id="user-name">Usuario</strong>
+        <small id="user-role"></small>
+      </div>
+      <button id="sign-out" class="button secondary small" type="button">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <main class="portal-layout">
+    <div id="global-message" class="message floating-message" hidden></div>
+
+    <section class="portal-hero">
+      <div>
+        <p class="eyebrow blue">Gestión territorial</p>
+        <h2 id="welcome-title">Estructuras de San Cristóbal</h2>
+        <p id="welcome-subtitle">Seleccione un territorio y una estructura para consultar sus 57 cargos.</p>
+      </div>
+      <div class="hero-metrics">
+        <article>
+          <strong id="metric-structures">0</strong>
+          <span>Estructuras visibles</span>
+        </article>
+        <article>
+          <strong id="metric-filled">0</strong>
+          <span>Cargos con nombre</span>
+        </article>
+        <article>
+          <strong id="metric-total">0</strong>
+          <span>Cargos de la estructura</span>
+        </article>
+      </div>
+    </section>
+
+    <nav id="main-tabs" class="tabs" aria-label="Secciones principales">
+      <button data-tab="structures" class="active" type="button">Estructuras y cargos</button>
+      <button data-tab="summary" type="button">Resumen de estructura</button>
+      <button data-tab="users" type="button" hidden>Usuarios y permisos</button>
+      <button data-tab="audit" type="button" hidden>Auditoría</button>
+    </nav>
+
+    <section id="structures-panel" class="tab-panel">
+      <div class="workspace-grid">
+        <aside class="structure-sidebar">
+          <div class="sidebar-controls">
+            <label class="field compact">
+              <span>Territorio autorizado</span>
+              <select id="territory-select"></select>
+            </label>
+            <label class="field compact">
+              <span>Buscar estructura</span>
+              <input id="structure-search" type="search" placeholder="Zona, región, recinto…">
+            </label>
+          </div>
+
+          <div class="sidebar-title">
+            <h3>Estructuras</h3>
+            <span id="structure-count" class="pill">0</span>
+          </div>
+
+          <div id="structure-list" class="structure-list" aria-live="polite"></div>
+        </aside>
+
+        <div class="structure-content">
+          <section id="territorial-header" class="territorial-header empty-state">
+            <div>
+              <p class="eyebrow">Encabezado territorial</p>
+              <h2>Seleccione una estructura</h2>
+              <p>Los datos territoriales protegidos aparecerán aquí.</p>
+            </div>
+          </section>
+
+          <div class="content-toolbar">
+            <div>
+              <h3>Tarjetas de cargos</h3>
+              <p id="cargo-toolbar-text" class="muted">Cada estructura contiene 57 cargos independientes.</p>
+            </div>
+            <label class="search-box">
+              <span class="sr-only">Buscar cargo o dirigente</span>
+              <input id="record-search" type="search" placeholder="Buscar cargo, nombre o cédula">
+            </label>
+          </div>
+
+          <div id="records-grid" class="records-grid">
+            <div class="empty-card full-span">
+              <strong>Seleccione una estructura</strong>
+              <span>Luego podrá abrir y editar cada ficha autorizada.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="summary-panel" class="tab-panel" hidden>
+      <div class="panel-card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow blue">Vista completa</p>
+            <h2 id="summary-title">Resumen de estructura</h2>
+            <p id="summary-context" class="muted">Muestra únicamente cargo, nombre y cédula.</p>
+          </div>
+          <div class="actions">
+            <button id="print-summary" class="button ghost" type="button">Imprimir</button>
+            <button id="export-summary" class="button secondary" type="button">Exportar CSV</button>
+          </div>
+        </div>
+
+        <div id="summary-header" class="summary-header"></div>
+
+        <div class="table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Cargo</th>
+                <th>Nombre completo</th>
+                <th>Cédula</th>
+              </tr>
+            </thead>
+            <tbody id="summary-body">
+              <tr><td colspan="4" class="loading">Seleccione una estructura.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="users-panel" class="tab-panel" hidden>
+      <div class="panel-card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow blue">Administración</p>
+            <h2>Usuarios y permisos</h2>
+            <p class="muted">Meta operativa: dos usuarios territoriales por cada territorio asignable.</p>
+          </div>
+          <button id="refresh-users" class="button ghost" type="button">Actualizar</button>
+        </div>
+
+        <div id="territory-coverage" class="coverage-grid"></div>
+
+        <div class="admin-layout">
+          <article class="form-card">
+            <h3>Crear usuario territorial</h3>
+            <form id="create-user-form" novalidate>
+              <label class="field">
+                <span>Nombre completo</span>
+                <input name="nombre_completo" required>
+              </label>
+              <label class="field">
+                <span>Nombre de usuario</span>
+                <input name="usuario_login" minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+" placeholder="Ej.: sancristobal01" required>
+              </label>
+              <label class="field">
+                <span>Contraseña temporal</span>
+                <input name="contrasena" type="password" minlength="8" autocomplete="new-password" required>
+              </label>
+              <label class="field">
+                <span>Territorio inicial</span>
+                <select name="territorio_codigo" required></select>
+              </label>
+              <div class="check-row">
+                <label><input name="puede_ver" type="checkbox" checked disabled> Puede ver</label>
+                <label><input name="puede_editar" type="checkbox" checked> Puede editar</label>
+              </div>
+              <div id="create-user-message" class="message" hidden></div>
+              <button id="create-user-button" class="button full" type="submit">Crear usuario</button>
+            </form>
+          </article>
+
+          <article class="users-card">
+            <div class="users-filter-row">
+              <label class="search-box grow">
+                <span class="sr-only">Buscar usuario</span>
+                <input id="user-search" type="search" placeholder="Buscar por nombre o usuario">
+              </label>
+              <span id="users-count" class="pill">0 usuarios</span>
+            </div>
+            <div class="table-wrap">
+              <table class="users-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Rol</th>
+                    <th>Territorios</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="users-body"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="audit-panel" class="tab-panel" hidden>
+      <div class="panel-card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow blue">Control de cambios</p>
+            <h2>Auditoría reciente</h2>
+            <p class="muted">Últimas 200 modificaciones realizadas sobre las fichas.</p>
+          </div>
+          <button id="refresh-audit" class="button ghost" type="button">Actualizar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Usuario</th>
+                <th>Territorio / estructura</th>
+                <th>Registro</th>
+                <th>Campos</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="audit-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="record-modal" class="record-modal">
+    <form id="record-form" method="dialog">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow blue">Ficha completa</p>
+          <h2 id="record-modal-title">Cargo</h2>
+          <p id="record-modal-context"></p>
+        </div>
+        <button id="close-record-modal" class="close-button" type="button" aria-label="Cerrar">×</button>
+      </header>
+
+      <div class="modal-content">
+        <div id="record-protected-fields" class="protected-grid"></div>
+        <div class="divider-title"><span>Datos personales y de contacto</span></div>
+        <div id="record-editable-fields" class="form-grid"></div>
+        <div id="record-message" class="message" hidden></div>
+      </div>
+
+      <footer class="modal-actions">
+        <button id="cancel-record" class="button ghost" type="button">Cancelar</button>
+        <button id="save-record" class="button" type="submit">Guardar cambios</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="permissions-modal">
+    <header class="modal-header">
+      <div>
+        <p class="eyebrow blue">Asignación territorial</p>
+        <h2 id="permissions-title">Permisos del usuario</h2>
+        <p>Seleccione los territorios que puede consultar o editar.</p>
+      </div>
+      <button id="close-permissions" class="close-button" type="button">×</button>
+    </header>
+    <div class="modal-content">
+      <div class="table-wrap">
+        <table class="permissions-table">
+          <thead>
+            <tr>
+              <th>Territorio</th>
+              <th>Ver</th>
+              <th>Editar</th>
+            </tr>
+          </thead>
+          <tbody id="permissions-body"></tbody>
+        </table>
+      </div>
+      <div id="permissions-message" class="message" hidden></div>
+    </div>
+    <footer class="modal-actions">
+      <button id="cancel-permissions" class="button ghost" type="button">Cancelar</button>
+      <button id="save-permissions" class="button" type="button">Guardar permisos</button>
+    </footer>
+  </dialog>
+
+  <dialog id="password-modal">
+    <form id="password-form" method="dialog">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow blue">Contraseña temporal</p>
+          <h2 id="password-title">Restablecer contraseña</h2>
+          <p id="password-context"></p>
+        </div>
+        <button id="close-password-modal" class="close-button" type="button">×</button>
+      </header>
+      <div class="modal-content">
+        <label class="field">
+          <span>Nueva contraseña temporal</span>
+          <input id="admin-new-password" type="password" minlength="8" autocomplete="new-password" required>
+        </label>
+        <div id="password-message" class="message" hidden></div>
+      </div>
+      <footer class="modal-actions">
+        <button id="cancel-password" class="button ghost" type="button">Cancelar</button>
+        <button id="save-password" class="button" type="submit">Restablecer</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="audit-detail-modal">
+    <header class="modal-header">
+      <div>
+        <p class="eyebrow blue">Auditoría</p>
+        <h2>Detalle de modificación</h2>
+      </div>
+      <button id="close-audit-detail" class="close-button" type="button">×</button>
+    </header>
+    <div id="audit-detail-content" class="modal-content audit-detail-grid"></div>
+  </dialog>
+
+  <script src="js/config.js"></script>
+  <script type="module" src="js/portal.js"></script>
+</body>
+</html>

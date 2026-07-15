@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#002f5f">
+  <title>Acceso · Portal Territorial San Cristóbal</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="login-page reference-login">
+  <img
+    class="reference-login__background"
+    src="assets/portada-login.png"
+    alt=""
+    aria-hidden="true"
+  >
+
+  <main class="reference-login__stage">
+    <section class="reference-login__card" aria-labelledby="portal-title">
+      <header class="reference-login__header">
+        <div class="reference-login__mark" aria-hidden="true">
+          <span class="reference-login__gear">⚙</span>
+        </div>
+        <div>
+          <h1 id="portal-title">PORTAL TERRITORIAL</h1>
+          <p>Acceso Centralizado para Usuarios</p>
+        </div>
+      </header>
+
+      <div class="reference-login__divider" aria-hidden="true"><span>✦</span></div>
+
+      <form id="login-form" class="reference-login__form" novalidate>
+        <label class="reference-login__field" aria-label="Territorio">
+          <span class="reference-login__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9S14.5 18.5 12 21M12 3C9.5 5.5 8.2 8.5 8.2 12S9.5 18.5 12 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <select id="territory" required>
+            <option value="">Cargando territorios…</option>
+          </select>
+        </label>
+
+        <label class="reference-login__field" aria-label="Usuario">
+          <span class="reference-login__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M4.5 21c.6-5 3.3-7.5 7.5-7.5s6.9 2.5 7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input
+            id="username"
+            type="text"
+            autocomplete="username"
+            maxlength="40"
+            placeholder="USUARIO"
+            required
+          >
+        </label>
+
+        <label class="reference-login__field" aria-label="Contraseña">
+          <span class="reference-login__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="8" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M12 12h9M17 12v3M20 12v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="CONTRASEÑA"
+            required
+          >
+          <button id="toggle-password" class="reference-login__toggle" type="button" aria-label="Mostrar contraseña">Ver</button>
+        </label>
+
+        <div id="message" class="message reference-login__message" hidden></div>
+
+        <button id="submit-button" class="reference-login__submit" type="submit">
+          <span>INICIAR SESIÓN</span>
+        </button>
+      </form>
+
+      <p class="reference-login__support">Acceso autorizado para dirigentes y administradores territoriales.</p>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script type="module" src="js/login.js"></script>
+</body>
+</html>

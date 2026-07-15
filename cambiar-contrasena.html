@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cambiar contraseña · Portal Territorial</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="login-page simple-login">
+  <main class="login-card standalone-card">
+    <div class="mobile-brand visible">
+      <div class="brand-mark">SC</div>
+      <div>
+        <strong data-app-name>Portal Territorial</strong>
+        <small>San Cristóbal</small>
+      </div>
+    </div>
+
+    <div class="login-heading">
+      <p class="eyebrow blue">Seguridad de la cuenta</p>
+      <h1>Cambiar contraseña</h1>
+      <p id="password-instruction">Cree una contraseña personal de al menos 8 caracteres.</p>
+    </div>
+
+    <form id="change-password-form" novalidate>
+      <label class="field">
+        <span>Nueva contraseña</span>
+        <input id="new-password" type="password" minlength="8" autocomplete="new-password" required>
+      </label>
+      <label class="field">
+        <span>Confirmar contraseña</span>
+        <input id="confirm-password" type="password" minlength="8" autocomplete="new-password" required>
+      </label>
+      <div id="message" class="message" hidden></div>
+      <button id="submit-button" class="button full" type="submit">Guardar contraseña</button>
+      <button id="cancel-button" class="button ghost full" type="button">Regresar al portal</button>
+    </form>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script type="module" src="js/change-password.js"></script>
+</body>
+</html>
