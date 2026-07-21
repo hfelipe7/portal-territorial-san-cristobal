@@ -6,6 +6,33 @@
   <meta name="theme-color" content="#0b4f8a">
   <title>Portal Territorial San Cristóbal</title>
   <link rel="stylesheet" href="css/styles.css">
+
+  <style>
+    .regional-section-heading {
+      display:flex; align-items:center; justify-content:space-between; gap:1rem;
+      padding:1rem 1.1rem; margin-top:.35rem; border:1px solid #dbe7f2;
+      border-radius:14px; background:#f5f9fd;
+    }
+    .regional-section-heading h3 { margin:.15rem 0 0; }
+    .regional-section-kicker { color:#0b4f8a; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+    .regional-section-badge { padding:.35rem .65rem; border-radius:999px; background:#e7f3ff; color:#0b4f8a; font-size:.78rem; font-weight:700; white-space:nowrap; }
+    .regional-section-badge.readonly { background:#eef1f4; color:#4d5965; }
+    .zonal-heading { margin-top:1.25rem; }
+    .zonal-authority-card { border-style:dashed; background:#fbfcfd; }
+    .zonal-source-label { margin:0 0 .35rem; color:#0b4f8a; font-size:.8rem; font-weight:700; text-transform:uppercase; }
+    .readonly-note { margin:.65rem 0; color:#65717c; font-size:.78rem; font-weight:600; }
+    .summary-section-row td { background:#edf5fb; padding-top:1rem; padding-bottom:1rem; }
+    .zonal-summary-row td { background:#fbfcfd; }
+    @media (max-width:700px) { .regional-section-heading { align-items:flex-start; flex-direction:column; } }
+    @media print {
+      .no-print, .topbar, #main-tabs, #structures-panel, #users-panel, #audit-panel, #print-summary, #export-summary, #global-message { display:none !important; }
+      #summary-panel { display:block !important; }
+      .portal-layout, .panel-card { padding:0 !important; margin:0 !important; box-shadow:none !important; border:0 !important; }
+      .summary-table { font-size:10pt; }
+      .summary-section-row { break-after:avoid; }
+      .zonal-summary-row { break-inside:avoid; }
+    }
+  </style>
 </head>
 <body class="portal-page">
   <header class="topbar">
@@ -34,7 +61,7 @@
       <div>
         <p class="eyebrow blue">Gestión territorial</p>
         <h2 id="welcome-title">Estructuras de San Cristóbal</h2>
-        <p id="welcome-subtitle">Seleccione un territorio y una estructura para consultar sus 57 cargos.</p>
+        <p id="welcome-subtitle">Seleccione un territorio y una estructura para consultar sus cargos y autoridades.</p>
       </div>
       <div class="hero-metrics">
         <article>
@@ -93,7 +120,7 @@
           <div class="content-toolbar">
             <div>
               <h3>Tarjetas de cargos</h3>
-              <p id="cargo-toolbar-text" class="muted">Cada estructura contiene 57 cargos independientes.</p>
+              <p id="cargo-toolbar-text" class="muted">La cantidad de cargos depende del nivel de la estructura.</p>
             </div>
             <label class="search-box">
               <span class="sr-only">Buscar cargo o dirigente</span>
