@@ -160,7 +160,7 @@
 
         <div class="admin-layout">
           <article class="form-card">
-            <h3>Crear usuario territorial</h3>
+            <h3>Crear usuario</h3>
             <form id="create-user-form" novalidate>
               <label class="field">
                 <span>Nombre completo</span>
@@ -175,8 +175,21 @@
                 <input name="contrasena" type="password" minlength="8" autocomplete="new-password" required>
               </label>
               <label class="field">
-                <span>Territorio inicial</span>
+                <span>Tipo de asignación</span>
+                <select id="assignment-type" name="tipo_asignacion" required>
+                  <option value="TERRITORIAL">Territorial</option>
+                  <option value="REGIONAL">Regional</option>
+                </select>
+              </label>
+              <label class="field">
+                <span id="territory-field-label">Territorio inicial</span>
                 <select name="territorio_codigo" required></select>
+              </label>
+              <label id="region-field" class="field" hidden>
+                <span>Región asignada</span>
+                <select id="region-select" name="region">
+                  <option value="">Seleccione una región</option>
+                </select>
               </label>
               <div class="check-row">
                 <label><input name="puede_ver" type="checkbox" checked disabled> Puede ver</label>
@@ -271,9 +284,9 @@
   <dialog id="permissions-modal">
     <header class="modal-header">
       <div>
-        <p class="eyebrow blue">Asignación territorial</p>
+        <p class="eyebrow blue">Asignación de acceso</p>
         <h2 id="permissions-title">Permisos del usuario</h2>
-        <p>Seleccione los territorios que puede consultar o editar.</p>
+        <p id="permissions-description">Seleccione los accesos que puede consultar o editar.</p>
       </div>
       <button id="close-permissions" class="close-button" type="button">×</button>
     </header>
