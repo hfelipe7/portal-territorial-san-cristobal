@@ -40,7 +40,11 @@ const state = {
   selectedRecord: null,
   users: [],
   allAssignments: [],
+  allRegionalAssignments: [],
   assignableTerritories: [],
+  regionalStructures: [],
+  regionalAssignments: [],
+  selectedPermissionType: "TERRITORIAL",
   selectedUserId: null,
   passwordUserId: null,
   auditRows: []
@@ -94,6 +98,10 @@ const els = {
   territoryCoverage: document.querySelector("#territory-coverage"),
   refreshUsers: document.querySelector("#refresh-users"),
   createUserForm: document.querySelector("#create-user-form"),
+  assignmentType: document.querySelector("#assignment-type"),
+  territoryFieldLabel: document.querySelector("#territory-field-label"),
+  regionField: document.querySelector("#region-field"),
+  regionSelect: document.querySelector("#region-select"),
   createUserMessage: document.querySelector("#create-user-message"),
   createUserButton: document.querySelector("#create-user-button"),
   userSearch: document.querySelector("#user-search"),
@@ -101,6 +109,7 @@ const els = {
   usersBody: document.querySelector("#users-body"),
   permissionsModal: document.querySelector("#permissions-modal"),
   permissionsTitle: document.querySelector("#permissions-title"),
+  permissionsDescription: document.querySelector("#permissions-description"),
   permissionsBody: document.querySelector("#permissions-body"),
   permissionsMessage: document.querySelector("#permissions-message"),
   closePermissions: document.querySelector("#close-permissions"),
@@ -171,7 +180,22 @@ function contextLine(item) {
 
 function canEditSelectedTerritory() {
   if (state.isAdmin) return true;
-  return state.assignments.get(state.selectedTerritory)?.puede_editar === true;
+
+  const territorialPermission =
+    state.assignments.get(state.selectedTerritory)?.puede_editar === true;
+
+  if (territorialPermission) return true;
+
+  const structureRegion = String(state.selectedStructure?.region || "").trim();
+  if (!structureRegion) return false;
+
+  return state.regionalAssignments.some((assignment) =>
+    assignment.territorio_codigo === state.selectedTerritory &&
+    assignment.region === structureRegion &&
+    assignment.activo === true &&
+    assignment.puede_ver === true &&
+    assignment.puede_editar === true
+  );
 }
 
 function setActiveTab(name) {
@@ -242,16 +266,33 @@ async function loadTerritories() {
   if (error) throw error;
   state.territories = territories || [];
 
-  const { data: assignments, error: assignmentError } = await supabase
-    .from("usuario_territorios")
-    .select("usuario_id,territorio_codigo,puede_ver,puede_editar,activo")
-    .eq("usuario_id", state.user.id)
-    .eq("activo", true);
+  const [territorialAssignmentsResult, regionalAssignmentsResult] =
+    await Promise.all([
+      supabase
+        .from("usuario_territorios")
+        .select("usuario_id,territorio_codigo,puede_ver,puede_editar,activo")
+        .eq("usuario_id", state.user.id)
+        .eq("activo", true),
+      supabase
+        .from("usuario_regiones")
+        .select("usuario_id,territorio_codigo,region,puede_ver,puede_editar,activo")
+        .eq("usuario_id", state.user.id)
+        .eq("activo", true)
+    ]);
 
-  if (assignmentError && !state.isAdmin) throw assignmentError;
+  if (territorialAssignmentsResult.error && !state.isAdmin) {
+    throw territorialAssignmentsResult.error;
+  }
+
+  if (regionalAssignmentsResult.error && !state.isAdmin) {
+    throw regionalAssignmentsResult.error;
+  }
+
+  const assignments = territorialAssignmentsResult.data || [];
+  state.regionalAssignments = regionalAssignmentsResult.data || [];
 
   state.assignments = new Map(
-    (assignments || []).map((item) => [item.territorio_codigo, item])
+    assignments.map((item) => [item.territorio_codigo, item])
   );
 
   if (state.isAdmin) {
@@ -584,29 +625,140 @@ function exportSummaryCsv() {
   URL.revokeObjectURL(link.href);
 }
 
+
+function getRegionalMunicipalityCodes() {
+  return new Set(
+    state.regionalStructures.map((item) => item.territorio_codigo)
+  );
+}
+
+function populateCreateUserTerritories() {
+  const territoryField = els.createUserForm.elements.territorio_codigo;
+  const assignmentType = els.assignmentType?.value || "TERRITORIAL";
+
+  const availableTerritories =
+    assignmentType === "REGIONAL"
+      ? state.assignableTerritories.filter((item) =>
+          getRegionalMunicipalityCodes().has(item.codigo)
+        )
+      : state.assignableTerritories;
+
+  territoryField.innerHTML =
+    '<option value="">Seleccione un territorio</option>' +
+    availableTerritories
+      .map(
+        (item) =>
+          `<option value="${escapeHtml(item.codigo)}">${escapeHtml(item.nombre)}</option>`
+      )
+      .join("");
+}
+
+function populateCreateUserRegions() {
+  const territoryCode =
+    els.createUserForm.elements.territorio_codigo.value || "";
+
+  const regions = state.regionalStructures
+    .filter((item) => item.territorio_codigo === territoryCode)
+    .sort((a, b) => String(a.region).localeCompare(String(b.region)));
+
+  els.regionSelect.innerHTML =
+    '<option value="">Seleccione una región</option>' +
+    regions
+      .map(
+        (item) =>
+          `<option value="${escapeHtml(item.region)}">${escapeHtml(
+            item.estructura_nombre || `Región ${item.region}`
+          )}</option>`
+      )
+      .join("");
+}
+
+function updateCreateUserAssignmentFields() {
+  const assignmentType = els.assignmentType?.value || "TERRITORIAL";
+  const isRegional = assignmentType === "REGIONAL";
+
+  els.regionField.hidden = !isRegional;
+  els.regionSelect.required = isRegional;
+  els.territoryFieldLabel.textContent = isRegional
+    ? "Municipio inicial"
+    : "Territorio inicial";
+
+  populateCreateUserTerritories();
+  populateCreateUserRegions();
+}
+
+function getUserAssignmentType(userId) {
+  const hasRegional = state.allRegionalAssignments.some(
+    (item) => item.usuario_id === userId && item.activo
+  );
+
+  return hasRegional ? "REGIONAL" : "TERRITORIAL";
+}
+
 async function loadAdminData() {
   if (!state.isAdmin) return;
-  els.usersBody.innerHTML = '<tr><td colspan="5" class="loading">Cargando usuarios…</td></tr>';
+  els.usersBody.innerHTML =
+    '<tr><td colspan="5" class="loading">Cargando usuarios…</td></tr>';
 
-  const [territoriesResult, usersResult, assignmentsResult] = await Promise.all([
-    supabase.from("territorios").select("codigo,nombre,tipo,orden").eq("asignable", true).eq("activo", true).order("orden"),
-    supabase.from("perfiles").select("id,usuario_login,nombre_completo,rol,activo,debe_cambiar_contrasena,ultimo_acceso,creado_en").order("creado_en"),
-    supabase.from("usuario_territorios").select("id,usuario_id,territorio_codigo,puede_ver,puede_editar,activo").eq("activo", true)
+  const [
+    territoriesResult,
+    usersResult,
+    assignmentsResult,
+    regionalAssignmentsResult,
+    regionalStructuresResult
+  ] = await Promise.all([
+    supabase
+      .from("territorios")
+      .select("codigo,nombre,tipo,orden")
+      .eq("asignable", true)
+      .eq("activo", true)
+      .order("orden"),
+    supabase
+      .from("perfiles")
+      .select(
+        "id,usuario_login,nombre_completo,rol,activo,debe_cambiar_contrasena,ultimo_acceso,creado_en"
+      )
+      .order("creado_en"),
+    supabase
+      .from("usuario_territorios")
+      .select(
+        "id,usuario_id,territorio_codigo,puede_ver,puede_editar,activo"
+      )
+      .eq("activo", true),
+    supabase
+      .from("usuario_regiones")
+      .select(
+        "id,usuario_id,territorio_codigo,region,puede_ver,puede_editar,activo"
+      )
+      .eq("activo", true),
+    supabase
+      .from("estructuras")
+      .select(
+        "estructura_codigo,territorio_codigo,estructura_nombre,municipio,region,orden_en_territorio,activo"
+      )
+      .eq("nivel_estructura", "REGION")
+      .eq("activo", true)
+      .order("territorio_codigo")
+      .order("region")
   ]);
 
   if (territoriesResult.error) throw territoriesResult.error;
   if (usersResult.error) throw usersResult.error;
   if (assignmentsResult.error) throw assignmentsResult.error;
+  if (regionalAssignmentsResult.error) {
+    throw regionalAssignmentsResult.error;
+  }
+  if (regionalStructuresResult.error) {
+    throw regionalStructuresResult.error;
+  }
 
   state.assignableTerritories = territoriesResult.data || [];
   state.users = usersResult.data || [];
   state.allAssignments = assignmentsResult.data || [];
+  state.allRegionalAssignments = regionalAssignmentsResult.data || [];
+  state.regionalStructures = regionalStructuresResult.data || [];
 
-  const territoryField = els.createUserForm.elements.territorio_codigo;
-  territoryField.innerHTML = '<option value="">Seleccione un territorio</option>' + state.assignableTerritories.map((item) =>
-    `<option value="${escapeHtml(item.codigo)}">${escapeHtml(item.nombre)}</option>`
-  ).join("");
-
+  updateCreateUserAssignmentFields();
   renderCoverage();
   renderUsers();
 }
@@ -642,48 +794,117 @@ function filteredUsers() {
 
 function renderUsers() {
   const users = filteredUsers();
-  const territoryByCode = new Map(state.assignableTerritories.map((item) => [item.codigo, item]));
-  els.usersCount.textContent = `${users.length} usuario${users.length === 1 ? "" : "s"}`;
+  const territoryByCode = new Map(
+    state.assignableTerritories.map((item) => [item.codigo, item])
+  );
+  els.usersCount.textContent = `${users.length} usuario${
+    users.length === 1 ? "" : "s"
+  }`;
 
   if (!users.length) {
-    els.usersBody.innerHTML = '<tr><td colspan="5" class="loading">No se encontraron usuarios.</td></tr>';
+    els.usersBody.innerHTML =
+      '<tr><td colspan="5" class="loading">No se encontraron usuarios.</td></tr>';
     return;
   }
 
-  els.usersBody.innerHTML = users.map((user) => {
-    const assignments = state.allAssignments.filter((item) => item.usuario_id === user.id && item.puede_ver);
-    const isSelf = user.id === state.user.id;
-    return `
+  els.usersBody.innerHTML = users
+    .map((user) => {
+      const assignments = state.allAssignments.filter(
+        (item) => item.usuario_id === user.id && item.puede_ver
+      );
+      const regionalAssignments = state.allRegionalAssignments.filter(
+        (item) => item.usuario_id === user.id && item.puede_ver
+      );
+      const isSelf = user.id === state.user.id;
+
+      const territorialChips = assignments.map(
+        (assignment) =>
+          `<span class="territory-chip">${escapeHtml(
+            territoryByCode.get(assignment.territorio_codigo)?.nombre ||
+              assignment.territorio_codigo
+          )}${assignment.puede_editar ? " · edita" : ""}</span>`
+      );
+
+      const regionalChips = regionalAssignments.map((assignment) => {
+        const territoryName =
+          territoryByCode.get(assignment.territorio_codigo)?.nombre ||
+          assignment.territorio_codigo;
+
+        return `<span class="territory-chip">Regional · ${escapeHtml(
+          territoryName
+        )} · Región ${escapeHtml(assignment.region)}${
+          assignment.puede_editar ? " · edita" : ""
+        }</span>`;
+      });
+
+      const chips = [...territorialChips, ...regionalChips];
+
+      return `
       <tr>
         <td class="user-name-cell">
-          <strong>${escapeHtml(user.nombre_completo || user.usuario_login)}</strong>
-          <small>@${escapeHtml(user.usuario_login)}${user.debe_cambiar_contrasena ? " · cambio de contraseña pendiente" : ""}</small>
+          <strong>${escapeHtml(
+            user.nombre_completo || user.usuario_login
+          )}</strong>
+          <small>@${escapeHtml(user.usuario_login)}${
+            user.debe_cambiar_contrasena
+              ? " · cambio de contraseña pendiente"
+              : ""
+          }</small>
         </td>
         <td>
-          <select class="role-select user-role-select" data-user-id="${user.id}" ${isSelf ? "disabled" : ""}>
-            <option value="USUARIO" ${user.rol === "USUARIO" ? "selected" : ""}>USUARIO</option>
-            <option value="ADMINISTRADOR" ${user.rol === "ADMINISTRADOR" ? "selected" : ""}>ADMINISTRADOR</option>
+          <select class="role-select user-role-select" data-user-id="${
+            user.id
+          }" ${isSelf ? "disabled" : ""}>
+            <option value="USUARIO" ${
+              user.rol === "USUARIO" ? "selected" : ""
+            }>USUARIO</option>
+            <option value="ADMINISTRADOR" ${
+              user.rol === "ADMINISTRADOR" ? "selected" : ""
+            }>ADMINISTRADOR</option>
           </select>
         </td>
         <td>
           <div class="territory-chips">
-            ${assignments.length
-              ? assignments.map((assignment) => `<span class="territory-chip">${escapeHtml(territoryByCode.get(assignment.territorio_codigo)?.nombre || assignment.territorio_codigo)}${assignment.puede_editar ? " · edita" : ""}</span>`).join("")
-              : '<span class="muted">Sin territorio asignado</span>'}
+            ${
+              chips.length
+                ? chips.join("")
+                : '<span class="muted">Sin territorio asignado</span>'
+            }
           </div>
         </td>
-        <td><span class="status ${user.activo ? "active" : "inactive"}">${user.activo ? "Activo" : "Inactivo"}</span><small class="muted">${user.ultimo_acceso ? `Último acceso: ${escapeHtml(formatDate(user.ultimo_acceso))}` : "Sin acceso registrado"}</small></td>
+        <td><span class="status ${
+          user.activo ? "active" : "inactive"
+        }">${user.activo ? "Activo" : "Inactivo"}</span><small class="muted">${
+        user.ultimo_acceso
+          ? `Último acceso: ${escapeHtml(formatDate(user.ultimo_acceso))}`
+          : "Sin acceso registrado"
+      }</small></td>
         <td>
           <div class="actions">
-            <button class="button ghost small user-permissions" data-user-id="${user.id}" type="button" ${user.rol === "ADMINISTRADOR" ? "disabled" : ""}>Permisos</button>
-            <button class="button ghost small user-password" data-user-id="${user.id}" type="button">Contraseña</button>
-            <button class="button secondary small user-toggle" data-user-id="${user.id}" data-active="${user.activo}" type="button" ${isSelf ? "disabled" : ""}>${user.activo ? "Desactivar" : "Activar"}</button>
-            <button class="button danger small user-delete" data-user-id="${user.id}" type="button" ${isSelf ? "disabled" : ""}>Eliminar</button>
+            <button class="button ghost small user-permissions" data-user-id="${
+              user.id
+            }" type="button" ${
+        user.rol === "ADMINISTRADOR" ? "disabled" : ""
+      }>Permisos</button>
+            <button class="button ghost small user-password" data-user-id="${
+              user.id
+            }" type="button">Contraseña</button>
+            <button class="button secondary small user-toggle" data-user-id="${
+              user.id
+            }" data-active="${user.activo}" type="button" ${
+        isSelf ? "disabled" : ""
+      }>${user.activo ? "Desactivar" : "Activar"}</button>
+            <button class="button danger small user-delete" data-user-id="${
+              user.id
+            }" type="button" ${
+        isSelf ? "disabled" : ""
+      }>Eliminar</button>
           </div>
         </td>
       </tr>
     `;
-  }).join("");
+    })
+    .join("");
 }
 
 async function createUser(event) {
@@ -693,28 +914,71 @@ async function createUser(event) {
   els.createUserButton.textContent = "Creando…";
 
   const formData = new FormData(els.createUserForm);
-  const territoryCode = String(formData.get("territorio_codigo") || "");
+  const assignmentType = String(
+    formData.get("tipo_asignacion") || "TERRITORIAL"
+  ).toUpperCase();
+  const territoryCode = String(
+    formData.get("territorio_codigo") || ""
+  );
+  const canEdit = formData.get("puede_editar") === "on";
 
   try {
-    const result = await invokeAuthenticatedFunction(adminFunctionUrl, {
+    const payload = {
       action: "create_user",
-      usuario_login: String(formData.get("usuario_login") || "").trim(),
-      nombre_completo: String(formData.get("nombre_completo") || "").trim(),
+      usuario_login: String(
+        formData.get("usuario_login") || ""
+      ).trim(),
+      nombre_completo: String(
+        formData.get("nombre_completo") || ""
+      ).trim(),
       contrasena: String(formData.get("contrasena") || ""),
-      territorios: territoryCode ? [{
-        territorio_codigo: territoryCode,
-        puede_ver: true,
-        puede_editar: formData.get("puede_editar") === "on"
-      }] : []
-    });
+      tipo_asignacion: assignmentType
+    };
 
-    showLocalMessage(els.createUserMessage, `Usuario ${result.usuario.usuario_login} creado correctamente.`, "success");
+    if (assignmentType === "REGIONAL") {
+      payload.territorio_codigo = territoryCode;
+      payload.region = String(formData.get("region") || "");
+      payload.puede_ver = true;
+      payload.puede_editar = canEdit;
+    } else {
+      payload.territorios = territoryCode
+        ? [
+            {
+              territorio_codigo: territoryCode,
+              puede_ver: true,
+              puede_editar: canEdit
+            }
+          ]
+        : [];
+    }
+
+    const result = await invokeAuthenticatedFunction(
+      adminFunctionUrl,
+      payload
+    );
+
+    const assignmentMessage =
+      result.tipo_asignacion === "REGIONAL"
+        ? ` como regional de la Región ${result.asignacion?.region || ""}`
+        : "";
+
+    showLocalMessage(
+      els.createUserMessage,
+      `Usuario ${result.usuario.usuario_login} creado correctamente${assignmentMessage}.`,
+      "success"
+    );
+
     els.createUserForm.reset();
+    els.assignmentType.value = "TERRITORIAL";
     els.createUserForm.elements.puede_ver.checked = true;
     els.createUserForm.elements.puede_editar.checked = true;
+    updateCreateUserAssignmentFields();
     await loadAdminData();
   } catch (error) {
-    showLocalMessage(els.createUserMessage, error.message || "No se pudo crear el usuario.");
+    showLocalMessage(
+      els.createUserMessage,
+      error.message || "No se pudo crear el usuario."
+    );
   } finally {
     els.createUserButton.disabled = false;
     els.createUserButton.textContent = "Crear usuario";
@@ -724,28 +988,102 @@ async function createUser(event) {
 function openPermissions(userId) {
   const user = state.users.find((item) => item.id === userId);
   if (!user || user.rol === "ADMINISTRADOR") return;
+
   state.selectedUserId = userId;
+  state.selectedPermissionType = getUserAssignmentType(userId);
   hideLocalMessage(els.permissionsMessage);
-  els.permissionsTitle.textContent = `Permisos de ${user.nombre_completo || user.usuario_login}`;
 
-  const assignmentMap = new Map(
-    state.allAssignments
-      .filter((item) => item.usuario_id === userId)
-      .map((item) => [item.territorio_codigo, item])
-  );
+  els.permissionsTitle.textContent = `Permisos de ${
+    user.nombre_completo || user.usuario_login
+  }`;
 
-  els.permissionsBody.innerHTML = state.assignableTerritories.map((territory) => {
-    const assignment = assignmentMap.get(territory.codigo);
-    const canView = assignment?.puede_ver === true;
-    const canEdit = assignment?.puede_editar === true;
-    return `
-      <tr data-territory-code="${escapeHtml(territory.codigo)}">
-        <td><strong>${escapeHtml(territory.nombre)}</strong><small class="muted">${escapeHtml(territory.tipo)}</small></td>
-        <td><input class="permission-view" type="checkbox" ${canView ? "checked" : ""}></td>
-        <td><input class="permission-edit" type="checkbox" ${canEdit ? "checked" : ""} ${canView ? "" : "disabled"}></td>
-      </tr>
-    `;
-  }).join("");
+  if (state.selectedPermissionType === "REGIONAL") {
+    els.permissionsDescription.textContent =
+      "Seleccione las regiones que puede consultar o editar. Cada región incluye su estructura regional y sus zonas.";
+
+    const assignmentMap = new Map(
+      state.allRegionalAssignments
+        .filter((item) => item.usuario_id === userId)
+        .map((item) => [
+          `${item.territorio_codigo}|${item.region}`,
+          item
+        ])
+    );
+
+    const territoryByCode = new Map(
+      state.assignableTerritories.map((item) => [
+        item.codigo,
+        item
+      ])
+    );
+
+    els.permissionsBody.innerHTML = state.regionalStructures
+      .map((regionStructure) => {
+        const key = `${regionStructure.territorio_codigo}|${regionStructure.region}`;
+        const assignment = assignmentMap.get(key);
+        const canView = assignment?.puede_ver === true;
+        const canEdit = assignment?.puede_editar === true;
+        const territoryName =
+          territoryByCode.get(regionStructure.territorio_codigo)?.nombre ||
+          regionStructure.municipio ||
+          regionStructure.territorio_codigo;
+
+        return `
+          <tr
+            data-territory-code="${escapeHtml(
+              regionStructure.territorio_codigo
+            )}"
+            data-region="${escapeHtml(regionStructure.region)}"
+          >
+            <td>
+              <strong>${escapeHtml(
+                territoryName
+              )} · Región ${escapeHtml(regionStructure.region)}</strong>
+              <small class="muted">Asignación regional</small>
+            </td>
+            <td><input class="permission-view" type="checkbox" ${
+              canView ? "checked" : ""
+            }></td>
+            <td><input class="permission-edit" type="checkbox" ${
+              canEdit ? "checked" : ""
+            } ${canView ? "" : "disabled"}></td>
+          </tr>
+        `;
+      })
+      .join("");
+  } else {
+    els.permissionsDescription.textContent =
+      "Seleccione los territorios que puede consultar o editar.";
+
+    const assignmentMap = new Map(
+      state.allAssignments
+        .filter((item) => item.usuario_id === userId)
+        .map((item) => [item.territorio_codigo, item])
+    );
+
+    els.permissionsBody.innerHTML = state.assignableTerritories
+      .map((territory) => {
+        const assignment = assignmentMap.get(territory.codigo);
+        const canView = assignment?.puede_ver === true;
+        const canEdit = assignment?.puede_editar === true;
+        return `
+          <tr data-territory-code="${escapeHtml(territory.codigo)}">
+            <td><strong>${escapeHtml(
+              territory.nombre
+            )}</strong><small class="muted">${escapeHtml(
+          territory.tipo
+        )}</small></td>
+            <td><input class="permission-view" type="checkbox" ${
+              canView ? "checked" : ""
+            }></td>
+            <td><input class="permission-edit" type="checkbox" ${
+              canEdit ? "checked" : ""
+            } ${canView ? "" : "disabled"}></td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
 
   els.permissionsModal.showModal();
 }
@@ -756,34 +1094,84 @@ async function savePermissions() {
   els.savePermissions.disabled = true;
   els.savePermissions.textContent = "Guardando…";
 
-  const rows = [...els.permissionsBody.querySelectorAll("tr[data-territory-code]")];
-  const assignments = rows.map((row) => ({
-    usuario_id: state.selectedUserId,
-    territorio_codigo: row.dataset.territoryCode,
-    puede_ver: row.querySelector(".permission-view").checked,
-    puede_editar: row.querySelector(".permission-edit").checked,
-    activo: true
-  })).filter((item) => item.puede_ver);
+  const rows = [
+    ...els.permissionsBody.querySelectorAll(
+      "tr[data-territory-code]"
+    )
+  ];
 
   try {
-    const { error: deleteError } = await supabase
-      .from("usuario_territorios")
-      .delete()
-      .eq("usuario_id", state.selectedUserId);
-    if (deleteError) throw deleteError;
+    if (state.selectedPermissionType === "REGIONAL") {
+      const assignments = rows
+        .map((row) => ({
+          usuario_id: state.selectedUserId,
+          territorio_codigo: row.dataset.territoryCode,
+          region: row.dataset.region,
+          puede_ver: row.querySelector(".permission-view").checked,
+          puede_editar:
+            row.querySelector(".permission-edit").checked,
+          activo: true
+        }))
+        .filter((item) => item.puede_ver)
+        .map((item) => ({
+          ...item,
+          puede_editar: item.puede_ver && item.puede_editar
+        }));
 
-    if (assignments.length) {
-      const { error: insertError } = await supabase
+      const { error: deleteError } = await supabase
+        .from("usuario_regiones")
+        .delete()
+        .eq("usuario_id", state.selectedUserId);
+      if (deleteError) throw deleteError;
+
+      if (assignments.length) {
+        const { error: insertError } = await supabase
+          .from("usuario_regiones")
+          .insert(assignments);
+        if (insertError) throw insertError;
+      }
+    } else {
+      const assignments = rows
+        .map((row) => ({
+          usuario_id: state.selectedUserId,
+          territorio_codigo: row.dataset.territoryCode,
+          puede_ver: row.querySelector(".permission-view").checked,
+          puede_editar:
+            row.querySelector(".permission-edit").checked,
+          activo: true
+        }))
+        .filter((item) => item.puede_ver)
+        .map((item) => ({
+          ...item,
+          puede_editar: item.puede_ver && item.puede_editar
+        }));
+
+      const { error: deleteError } = await supabase
         .from("usuario_territorios")
-        .insert(assignments);
-      if (insertError) throw insertError;
+        .delete()
+        .eq("usuario_id", state.selectedUserId);
+      if (deleteError) throw deleteError;
+
+      if (assignments.length) {
+        const { error: insertError } = await supabase
+          .from("usuario_territorios")
+          .insert(assignments);
+        if (insertError) throw insertError;
+      }
     }
 
-    showLocalMessage(els.permissionsMessage, "Permisos actualizados.", "success");
+    showLocalMessage(
+      els.permissionsMessage,
+      "Permisos actualizados.",
+      "success"
+    );
     await loadAdminData();
     setTimeout(() => els.permissionsModal.close(), 650);
   } catch (error) {
-    showLocalMessage(els.permissionsMessage, error.message || "No se pudieron guardar los permisos.");
+    showLocalMessage(
+      els.permissionsMessage,
+      error.message || "No se pudieron guardar los permisos."
+    );
   } finally {
     els.savePermissions.disabled = false;
     els.savePermissions.textContent = "Guardar permisos";
@@ -1005,6 +1393,19 @@ els.printSummary.addEventListener("click", () => window.print());
 els.exportSummary.addEventListener("click", exportSummaryCsv);
 
 els.createUserForm.addEventListener("submit", createUser);
+
+els.assignmentType.addEventListener("change", () => {
+  updateCreateUserAssignmentFields();
+});
+
+els.createUserForm.elements.territorio_codigo.addEventListener(
+  "change",
+  () => {
+    if (els.assignmentType.value === "REGIONAL") {
+      populateCreateUserRegions();
+    }
+  }
+);
 els.refreshUsers.addEventListener("click", async () => {
   try { await loadAdminData(); } catch (error) { showMessage(error.message); }
 });
