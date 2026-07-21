@@ -225,12 +225,22 @@ function canEditSelectedTerritory() {
 
   if (territorialPermission) return true;
 
-  const structureRegion = String(state.selectedStructure?.region || "").trim();
-  if (!structureRegion) return false;
+  // Los permisos regionales permiten editar únicamente la estructura REGIÓN
+  // asignada y las ZONAS que pertenecen a esa misma región. No afectan otros niveles.
+  const selectedLevel = String(
+    state.selectedStructure?.nivel_estructura || ""
+  ).trim().toUpperCase();
+
+  if (!["REGION", "ZONA"].includes(selectedLevel)) return false;
+
+  const structureRegionNumber = normalizedRegionNumber(
+    state.selectedStructure?.region
+  );
+  if (structureRegionNumber === null) return false;
 
   return state.regionalAssignments.some((assignment) =>
     assignment.territorio_codigo === state.selectedTerritory &&
-    assignment.region === structureRegion &&
+    normalizedRegionNumber(assignment.region) === structureRegionNumber &&
     assignment.activo === true &&
     assignment.puede_ver === true &&
     assignment.puede_editar === true
@@ -682,7 +692,7 @@ function renderSummary() {
         <td>${order}</td>
         <td><strong>${escapeHtml(cargo)}</strong></td>
         <td>${escapeHtml(record?.nombre_completo || "VACANTE / SIN NOMBRE")}</td>
-        <td>${escapeHtml(record?.cedula || "")}</td>
+        <td>${escapeHtml(record?.cedula || "SIN CÉDULA REGISTRADA")}</td>
       </tr>
     `).join("")}
   ` : "";
