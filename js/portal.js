@@ -27,6 +27,24 @@ const EDITABLE_FIELDS = [
   ["tiktok", "TikTok", "text"]
 ];
 
+const REGIONAL_CARGO_CODES = new Set([
+  "CARGO_01", "CARGO_02", "CARGO_03", "CARGO_04",
+  "CARGO_05", "CARGO_06", "CARGO_07", "CARGO_08",
+  "CARGO_09", "CARGO_10", "CARGO_11", "CARGO_12",
+  "CARGO_25", "CARGO_26", "CARGO_27", "CARGO_28",
+  "CARGO_34", "CARGO_35",
+  "REG_CARGO_01", "REG_CARGO_02", "REG_CARGO_03"
+]);
+
+const REGIONAL_VISUAL_ORDER = new Map([
+  ["CARGO_01", 1], ["CARGO_02", 2], ["CARGO_03", 3], ["CARGO_04", 4],
+  ["CARGO_05", 5], ["CARGO_06", 6], ["CARGO_07", 7], ["CARGO_08", 8],
+  ["CARGO_09", 9], ["CARGO_10", 10], ["CARGO_11", 11], ["CARGO_12", 12],
+  ["CARGO_25", 13], ["CARGO_28", 14], ["CARGO_34", 15], ["CARGO_35", 16],
+  ["CARGO_26", 17], ["CARGO_27", 18],
+  ["REG_CARGO_01", 19], ["REG_CARGO_02", 20], ["REG_CARGO_03", 21]
+]);
+
 const state = {
   user: null,
   profile: null,
@@ -37,6 +55,7 @@ const state = {
   selectedTerritory: "",
   selectedStructure: null,
   records: [],
+  zonalAuthorities: [],
   selectedRecord: null,
   users: [],
   allAssignments: [],
@@ -176,6 +195,26 @@ function contextLine(item) {
     item.codigo_recinto && `Recinto ${item.codigo_recinto}`,
     item.descripcion_recinto
   ].filter(Boolean).join(" · ");
+}
+
+function normalizedRegionNumber(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? Number(digits) : null;
+}
+
+function isRegionalStructure(item = state.selectedStructure) {
+  return String(item?.nivel_estructura || "").trim().toUpperCase() === "REGION";
+}
+
+function regionalVisualOrder(record) {
+  return REGIONAL_VISUAL_ORDER.get(record.cargo_codigo) ?? record.orden_cargo;
+}
+
+function visibleStructureRecords(records = state.records) {
+  if (!isRegionalStructure()) return records;
+  return records
+    .filter((record) => REGIONAL_CARGO_CODES.has(record.cargo_codigo))
+    .sort((a, b) => regionalVisualOrder(a) - regionalVisualOrder(b));
 }
 
 function canEditSelectedTerritory() {
@@ -324,6 +363,7 @@ async function loadTerritories() {
 async function loadStructures() {
   state.selectedStructure = null;
   state.records = [];
+  state.zonalAuthorities = [];
   renderTerritorialHeader();
   renderRecordCards();
   renderSummary();
@@ -391,6 +431,48 @@ function renderStructureList() {
   `).join("");
 }
 
+async function loadZonalAuthorities(regionStructure) {
+  state.zonalAuthorities = [];
+  if (!isRegionalStructure(regionStructure)) return;
+
+  const regionNumber = normalizedRegionNumber(regionStructure.region);
+  if (regionNumber === null) return;
+
+  const zoneStructures = state.structures.filter((item) =>
+    String(item.nivel_estructura || "").trim().toUpperCase() === "ZONA" &&
+    normalizedRegionNumber(item.region) === regionNumber
+  );
+
+  if (!zoneStructures.length) return;
+
+  const zoneCodes = zoneStructures.map((item) => item.estructura_codigo);
+  const { data, error } = await supabase
+    .from("v_fichas_portal")
+    .select("*")
+    .in("estructura_codigo", zoneCodes)
+    .in("cargo_codigo", ["CARGO_01", "CARGO_05"])
+    .order("estructura_codigo")
+    .order("orden_cargo");
+
+  if (error) throw error;
+
+  const recordsByZone = new Map();
+  for (const record of data || []) {
+    if (!recordsByZone.has(record.estructura_codigo)) {
+      recordsByZone.set(record.estructura_codigo, new Map());
+    }
+    recordsByZone.get(record.estructura_codigo).set(record.cargo_codigo, record);
+  }
+
+  state.zonalAuthorities = zoneStructures
+    .sort((a, b) => (a.orden_en_territorio || 0) - (b.orden_en_territorio || 0))
+    .map((zone) => ({
+      zone,
+      president: recordsByZone.get(zone.estructura_codigo)?.get("CARGO_01") || null,
+      secretary: recordsByZone.get(zone.estructura_codigo)?.get("CARGO_05") || null
+    }));
+}
+
 async function selectStructure(structureCode) {
   const structure = state.structures.find((item) => item.estructura_codigo === structureCode);
   if (!structure) return;
@@ -398,7 +480,7 @@ async function selectStructure(structureCode) {
   state.selectedStructure = structure;
   renderStructureList();
   renderTerritorialHeader();
-  els.recordsGrid.innerHTML = '<div class="loading full-span">Cargando los 57 cargos…</div>';
+  els.recordsGrid.innerHTML = `<div class="loading full-span">Cargando ${isRegionalStructure(structure) ? "la estructura regional" : "los cargos"}…</div>`;
 
   const { data, error } = await supabase
     .from("v_fichas_portal")
@@ -408,6 +490,7 @@ async function selectStructure(structureCode) {
 
   if (error) throw error;
   state.records = data || [];
+  await loadZonalAuthorities(structure);
 
   renderRecordCards();
   renderSummary();
@@ -450,35 +533,56 @@ function renderTerritorialHeader() {
 }
 
 function filteredRecords() {
+  const baseRecords = visibleStructureRecords();
   const term = els.recordSearch.value.trim().toLowerCase();
-  if (!term) return state.records;
-  return state.records.filter((record) =>
+  if (!term) return baseRecords;
+  return baseRecords.filter((record) =>
     [record.cargo, record.nombre_completo, record.cedula]
       .some((value) => String(value || "").toLowerCase().includes(term))
   );
 }
 
+function renderReadOnlyAuthorityCard(record, zone, label, visualNumber) {
+  const complete = Boolean(record?.nombre_completo && record?.cedula);
+  return `
+    <article class="record-card zonal-authority-card">
+      <div class="record-card-top">
+        <span class="cargo-number">${escapeHtml(visualNumber)}</span>
+        <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
+      </div>
+      <p class="zonal-source-label">${escapeHtml(zone.estructura_nombre)}</p>
+      <h4>${escapeHtml(label)}</h4>
+      <div class="record-person ${record?.nombre_completo ? "" : "empty"}">
+        <strong>${escapeHtml(record?.nombre_completo || "Vacante / sin nombre")}</strong>
+        <span>${escapeHtml(record?.cedula ? `Cédula: ${record.cedula}` : "Sin cédula registrada")}</span>
+      </div>
+      <div class="readonly-note">Solo lectura desde la región</div>
+      <button class="button ghost small open-zone no-print" type="button" data-zone-code="${escapeHtml(zone.estructura_codigo)}">Abrir zona para editar</button>
+    </article>
+  `;
+}
+
 function renderRecordCards() {
   if (!state.selectedStructure) {
     els.recordsGrid.innerHTML = '<div class="empty-card full-span"><strong>Seleccione una estructura</strong><span>Luego podrá abrir y editar cada ficha autorizada.</span></div>';
-    els.cargoToolbarText.textContent = "Cada estructura contiene 57 cargos independientes.";
+    els.cargoToolbarText.textContent = "Seleccione una estructura para consultar sus cargos.";
     return;
   }
 
   const records = filteredRecords();
-  els.cargoToolbarText.textContent = `${records.length} de ${state.records.length} cargos mostrados · ${canEditSelectedTerritory() ? "Edición permitida" : "Solo lectura"}.`;
+  const regional = isRegionalStructure();
+  const totalVisible = visibleStructureRecords().length;
+  els.cargoToolbarText.textContent = regional
+    ? `${records.length} de ${totalVisible} cargos regionales mostrados · ${canEditSelectedTerritory() ? "Edición permitida" : "Solo lectura"}. Las autoridades zonales se muestran debajo y se editan únicamente desde su zona.`
+    : `${records.length} de ${state.records.length} cargos mostrados · ${canEditSelectedTerritory() ? "Edición permitida" : "Solo lectura"}.`;
 
-  if (!records.length) {
-    els.recordsGrid.innerHTML = '<div class="empty-card full-span"><strong>No se encontraron cargos</strong><span>Quite o cambie el texto de búsqueda.</span></div>';
-    return;
-  }
-
-  els.recordsGrid.innerHTML = records.map((record) => {
+  const regionalCards = records.map((record) => {
     const complete = Boolean(record.nombre_completo && record.cedula);
+    const displayOrder = regional ? regionalVisualOrder(record) : record.orden_cargo;
     return `
       <article class="record-card">
         <div class="record-card-top">
-          <span class="cargo-number">${String(record.orden_cargo).padStart(2, "0")}</span>
+          <span class="cargo-number">${String(displayOrder).padStart(2, "0")}</span>
           <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
         </div>
         <h4>${escapeHtml(record.cargo)}</h4>
@@ -492,12 +596,49 @@ function renderRecordCards() {
       </article>
     `;
   }).join("");
+
+  if (!regional) {
+    els.recordsGrid.innerHTML = regionalCards || '<div class="empty-card full-span"><strong>No se encontraron cargos</strong><span>Quite o cambie el texto de búsqueda.</span></div>';
+    return;
+  }
+
+  const term = els.recordSearch.value.trim().toLowerCase();
+  const authorities = state.zonalAuthorities.filter(({ zone, president, secretary }) => {
+    if (!term) return true;
+    return [zone.estructura_nombre, president?.nombre_completo, secretary?.nombre_completo, president?.cedula, secretary?.cedula]
+      .some((value) => String(value || "").toLowerCase().includes(term));
+  });
+
+  const authorityCards = authorities.map(({ zone, president, secretary }, index) => {
+    const base = 22 + index * 2;
+    return [
+      renderReadOnlyAuthorityCard(president, zone, "Presidente(a) zonal", String(base).padStart(2, "0")),
+      renderReadOnlyAuthorityCard(secretary, zone, "Secretario(a) General zonal", String(base + 1).padStart(2, "0"))
+    ].join("");
+  }).join("");
+
+  els.recordsGrid.innerHTML = `
+    <div class="regional-section-heading full-span">
+      <div><span class="regional-section-kicker">Dirección regional</span><h3>21 cargos regionales</h3></div>
+      <span class="regional-section-badge">Editables según permisos</span>
+    </div>
+    ${regionalCards || '<div class="empty-card full-span"><strong>No se encontraron cargos regionales</strong></div>'}
+    <div class="regional-section-heading full-span zonal-heading">
+      <div><span class="regional-section-kicker">Miembros del órgano regional</span><h3>Presidentes y secretarios generales de las zonas</h3></div>
+      <span class="regional-section-badge readonly">Solo lectura aquí</span>
+    </div>
+    ${authorityCards || '<div class="empty-card full-span"><strong>No hay autoridades zonales visibles</strong><span>Revise la relación de las zonas con esta región.</span></div>'}
+  `;
 }
 
 function updateMetrics() {
-  const filled = state.records.filter((record) => record.nombre_completo).length;
+  const records = visibleStructureRecords();
+  const zonalRecords = isRegionalStructure()
+    ? state.zonalAuthorities.flatMap((item) => [item.president, item.secretary]).filter(Boolean)
+    : [];
+  const filled = [...records, ...zonalRecords].filter((record) => record.nombre_completo).length;
   els.metricFilled.textContent = String(filled);
-  els.metricTotal.textContent = String(state.records.length);
+  els.metricTotal.textContent = String(records.length + zonalRecords.length);
 }
 
 function renderSummary() {
@@ -510,17 +651,43 @@ function renderSummary() {
     return;
   }
 
+  const records = visibleStructureRecords();
+  const regional = isRegionalStructure();
+  const authorityRows = regional
+    ? state.zonalAuthorities.flatMap(({ zone, president, secretary }, index) => [
+        { order: 22 + index * 2, cargo: `${zone.estructura_nombre} · Presidente(a) zonal`, record: president },
+        { order: 23 + index * 2, cargo: `${zone.estructura_nombre} · Secretario(a) General zonal`, record: secretary }
+      ])
+    : [];
+
   els.summaryTitle.textContent = item.estructura_nombre;
-  els.summaryContext.textContent = `${state.records.length} cargos · vista resumida para revisión o impresión.`;
+  els.summaryContext.textContent = regional
+    ? `${records.length} cargos regionales + ${authorityRows.length} autoridades zonales · vista completa para revisión o impresión.`
+    : `${records.length} cargos · vista resumida para revisión o impresión.`;
   els.summaryHeader.innerHTML = `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong><span>${escapeHtml(contextLine(item))}</span>`;
-  els.summaryBody.innerHTML = state.records.map((record) => `
+
+  const regionalRows = records.map((record) => `
     <tr>
-      <td>${record.orden_cargo}</td>
+      <td>${regional ? regionalVisualOrder(record) : record.orden_cargo}</td>
       <td><strong>${escapeHtml(record.cargo)}</strong></td>
       <td>${escapeHtml(record.nombre_completo || "")}</td>
       <td>${escapeHtml(record.cedula || "")}</td>
     </tr>
   `).join("");
+
+  const zonalRows = authorityRows.length ? `
+    <tr class="summary-section-row"><td colspan="4"><strong>Presidentes y secretarios generales de las zonas · solo lectura en esta vista</strong></td></tr>
+    ${authorityRows.map(({ order, cargo, record }) => `
+      <tr class="zonal-summary-row">
+        <td>${order}</td>
+        <td><strong>${escapeHtml(cargo)}</strong></td>
+        <td>${escapeHtml(record?.nombre_completo || "VACANTE / SIN NOMBRE")}</td>
+        <td>${escapeHtml(record?.cedula || "")}</td>
+      </tr>
+    `).join("")}
+  ` : "";
+
+  els.summaryBody.innerHTML = regionalRows + zonalRows;
 }
 
 function openRecord(recordId) {
@@ -604,15 +771,27 @@ async function saveRecord(event) {
 }
 
 function exportSummaryCsv() {
-  if (!state.selectedStructure || !state.records.length) {
+  const records = visibleStructureRecords();
+  if (!state.selectedStructure || !records.length) {
     showMessage("Seleccione una estructura antes de exportar.");
     return;
   }
 
   const rows = [
-    ["ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA"],
-    ...state.records.map((record) => [record.orden_cargo, record.cargo, record.nombre_completo || "", record.cedula || ""])
+    ["ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN"],
+    ...records.map((record) => [
+      isRegionalStructure() ? regionalVisualOrder(record) : record.orden_cargo,
+      record.cargo, record.nombre_completo || "", record.cedula || "",
+      isRegionalStructure() ? "DIRECCION REGIONAL" : "ESTRUCTURA"
+    ])
   ];
+
+  if (isRegionalStructure()) {
+    state.zonalAuthorities.forEach(({ zone, president, secretary }, index) => {
+      rows.push([22 + index * 2, `${zone.estructura_nombre} · Presidente(a) zonal`, president?.nombre_completo || "VACANTE / SIN NOMBRE", president?.cedula || "", "ZONA · SOLO LECTURA"]);
+      rows.push([23 + index * 2, `${zone.estructura_nombre} · Secretario(a) General zonal`, secretary?.nombre_completo || "VACANTE / SIN NOMBRE", secretary?.cedula || "", "ZONA · SOLO LECTURA"]);
+    });
+  }
 
   const csv = "\uFEFF" + rows.map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -1381,9 +1560,22 @@ els.structureList.addEventListener("click", async (event) => {
   }
 });
 
-els.recordsGrid.addEventListener("click", (event) => {
-  const button = event.target.closest(".open-record[data-record-id]");
-  if (button) openRecord(button.dataset.recordId);
+els.recordsGrid.addEventListener("click", async (event) => {
+  const recordButton = event.target.closest(".open-record[data-record-id]");
+  if (recordButton) {
+    openRecord(recordButton.dataset.recordId);
+    return;
+  }
+
+  const zoneButton = event.target.closest(".open-zone[data-zone-code]");
+  if (zoneButton) {
+    try {
+      await selectStructure(zoneButton.dataset.zoneCode);
+      document.querySelector("#territorial-header")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      showMessage(error.message || "No se pudo abrir la zona.");
+    }
+  }
 });
 
 els.recordForm.addEventListener("submit", saveRecord);
