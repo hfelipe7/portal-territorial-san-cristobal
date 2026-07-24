@@ -86,6 +86,7 @@ const els = {
   summaryTab: document.querySelector('[data-tab="summary"]'),
   usersTab: document.querySelector('[data-tab="users"]'),
   auditTab: document.querySelector('[data-tab="audit"]'),
+  approvalsTab: document.querySelector("#approvals-tab"),
   structuresPanel: document.querySelector("#structures-panel"),
   summaryPanel: document.querySelector("#summary-panel"),
   usersPanel: document.querySelector("#users-panel"),
@@ -302,6 +303,7 @@ async function requireSession() {
   els.userRole.textContent = state.isAdmin ? "Administrador provincial" : `Usuario territorial · ${profile.usuario_login}`;
   els.usersTab.hidden = !state.isAdmin;
   els.auditTab.hidden = !state.isAdmin;
+  els.approvalsTab.hidden = !state.isAdmin;
   return true;
 }
 
@@ -1532,6 +1534,12 @@ els.signOut.addEventListener("click", async () => {
 });
 
 els.changePassword.addEventListener("click", () => window.location.assign("cambiar-contrasena.html"));
+
+els.approvalsTab.addEventListener("click", () => {
+  if (!state.isAdmin || els.approvalsTab.hidden) return;
+
+  window.location.assign("aprobaciones/aprobaciones.html");
+});
 
 els.mainTabs.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-tab]");
