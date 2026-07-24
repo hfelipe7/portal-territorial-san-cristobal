@@ -273,7 +273,18 @@ async function initialize() {
     showMessage("Complete admin/config.js con la URL de Supabase y la clave publicable.", "error");
     return;
   }
-  supabase = createClient(config.supabaseUrl, config.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  supabase = createClient(
+  config.supabaseUrl,
+  config.publishableKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: "portal-territorial-sc-auth"
+    }
+  }
+);
   bindFilters();
 
   $("#login-form").addEventListener("submit", async (event) => {
