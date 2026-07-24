@@ -1,5 +1,5 @@
 window.SIGEP_ADMIN_CONFIG = Object.freeze({
-  supabaseUrl: "https://PROJECT_REF.supabase.co",
-  publishableKey: "YOUR_SUPABASE_PUBLISHABLE_KEY",
+  supabaseUrl: "https://duvtqrgmnqbcuqdafttf.supabase.co",
+  publishableKey: "sb_publishable_lckjja0pcANcQh07xrlS7Q_G9W0CAVP",
   portalVersion: "1.0.0"
 });
