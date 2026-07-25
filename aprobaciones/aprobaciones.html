@@ -15,8 +15,10 @@
     <div>
       <p class="kicker">SIGEP · PRM SAN CRISTÓBAL</p>
       <h1>Aprobaciones</h1>
+      <p class="topbar-subtitle">Nuevo cargo, actualización de datos y corrección de ficha</p>
     </div>
     <div class="topbar-actions">
+      <a class="secondary button-link" href="../portal.html">Volver al portal territorial</a>
       <span id="session-user"></span>
       <button id="refresh-button" class="secondary" type="button" hidden>Actualizar</button>
       <button id="logout-button" class="secondary" type="button" hidden>Cerrar sesión</button>
@@ -39,12 +41,18 @@
     </section>
 
     <section id="dashboard" hidden>
-      <section class="metrics" aria-label="Métricas de solicitudes">
+      <section class="metrics" aria-label="Métricas por estado">
         <article><span>Pendientes</span><strong id="metric-pending">0</strong></article>
         <article><span>En revisión</span><strong id="metric-review">0</strong></article>
         <article><span>Aprobadas</span><strong id="metric-approved">0</strong></article>
         <article><span>Rechazadas</span><strong id="metric-rejected">0</strong></article>
         <article><span>Cerradas</span><strong id="metric-closed">0</strong></article>
+      </section>
+
+      <section class="type-metrics" aria-label="Métricas por tipo de solicitud">
+        <article class="type-metric type-new"><span>Solicitudes de cargo</span><strong id="metric-type-new">0</strong></article>
+        <article class="type-metric type-update"><span>Actualizaciones de datos</span><strong id="metric-type-update">0</strong></article>
+        <article class="type-metric type-correction"><span>Correcciones de ficha</span><strong id="metric-type-correction">0</strong></article>
       </section>
 
       <section class="panel filters-panel">
@@ -54,6 +62,7 @@
         </div>
         <div class="filters-grid">
           <label>Nombre o cédula<input id="filter-text" type="search" placeholder="Nombre o cédula enmascarada"></label>
+          <label>Tipo<select id="filter-type"><option value="">Todos</option></select></label>
           <label>Estado<select id="filter-state"><option value="">Todos</option></select></label>
           <label>Nivel<select id="filter-level"><option value="">Todos</option></select></label>
           <label>Territorio<input id="filter-territory" type="search" placeholder="Municipio, región o zona"></label>
@@ -64,7 +73,11 @@
 
       <section class="panel">
         <div class="panel-heading">
-          <div><p class="kicker">Cola de trabajo</p><h2>Solicitudes</h2></div>
+          <div>
+            <p class="kicker">Cola de trabajo</p>
+            <h2>Solicitudes</h2>
+            <p class="panel-help">Abra el detalle para comparar la ficha actual con lo solicitado antes de decidir.</p>
+          </div>
           <span id="results-count" class="count-chip">0 resultados</span>
         </div>
         <div id="requests-list" class="requests-list"></div>
@@ -72,10 +85,27 @@
     </section>
   </main>
 
+  <dialog id="detail-dialog" class="detail-dialog">
+    <section class="detail-dialog-shell">
+      <header class="dialog-header">
+        <div>
+          <p class="kicker">Revisión administrativa</p>
+          <h2 id="detail-title">Detalle de solicitud</h2>
+          <p id="detail-subtitle"></p>
+        </div>
+        <button id="detail-close" class="secondary icon-button" type="button" aria-label="Cerrar">×</button>
+      </header>
+      <div id="detail-message" class="message" role="status" aria-live="polite" hidden></div>
+      <div id="detail-content" class="detail-content"></div>
+      <div id="detail-actions" class="request-actions detail-actions"></div>
+    </section>
+  </dialog>
+
   <dialog id="action-dialog">
     <form method="dialog" id="action-form">
       <h2 id="dialog-title">Acción administrativa</h2>
       <p id="dialog-description"></p>
+      <div id="dialog-warning" class="request-note" hidden></div>
       <label for="dialog-reason">Motivo u observación</label>
       <textarea id="dialog-reason" rows="5" maxlength="2000"></textarea>
       <div class="dialog-actions">
