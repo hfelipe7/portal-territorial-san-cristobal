@@ -1,3 +1,4 @@
+// SIGEP PRM SC — PORTAL BUILD: NOMBRE_CEDULA_BACKEND_V1_2
 import {
   supabase,
   appName,
@@ -953,6 +954,8 @@ function openRecord(recordId) {
         value="${escapeHtml(value)}"
         readonly
         aria-readonly="true"
+        autocomplete="off"
+        data-form-type="other"
         title="El nombre se obtiene automáticamente desde la base maestra."
         ${canEditSelectedTerritory() ? "" : "disabled"}
       >`;
