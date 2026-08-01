@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_RPC_V1_3
+// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_RPC_V1_3_1_ARCHIVO_COMPLETO
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_RPC_V1_3";
+window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_RPC_V1_3_1_ARCHIVO_COMPLETO";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -2562,3 +2562,35 @@ els.usersBody.addEventListener("click", async (event) => {
 els.permissionsBody.addEventListener("change", (event) => {
   const row = event.target.closest("tr[data-territory-code]");
   if (!row) return;
+  const view = row.querySelector(".permission-view");
+  const edit = row.querySelector(".permission-edit");
+  if (event.target === view) {
+    edit.disabled = !view.checked;
+    if (!view.checked) edit.checked = false;
+  }
+  if (event.target === edit && edit.checked) view.checked = true;
+});
+
+els.savePermissions.addEventListener("click", savePermissions);
+els.closePermissions.addEventListener("click", () => els.permissionsModal.close());
+els.cancelPermissions.addEventListener("click", () => els.permissionsModal.close());
+els.passwordForm.addEventListener("submit", resetPassword);
+els.closePasswordModal.addEventListener("click", () => els.passwordModal.close());
+els.cancelPassword.addEventListener("click", () => els.passwordModal.close());
+els.refreshAudit.addEventListener("click", async () => {
+  try { await loadAudit(); } catch (error) { showMessage(error.message); }
+});
+els.auditBody.addEventListener("click", (event) => {
+  const button = event.target.closest(".audit-detail[data-audit-id]");
+  if (button) openAuditDetail(button.dataset.auditId);
+});
+els.closeAuditDetail.addEventListener("click", () => els.auditDetailModal.close());
+
+supabase.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT") {
+    clearLoginContext();
+    window.location.replace("index.html");
+  }
+});
+
+await initialize();
