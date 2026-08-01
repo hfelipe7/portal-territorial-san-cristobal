@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_SECCIONES_V1_0
+// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_RPC_V1_3
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_SECCIONES_V1_0";
+window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_RPC_V1_3";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -552,6 +552,90 @@ function isProvincialStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "PROVINCIA";
 }
 
+function provincialDiagnostic(records) {
+  const bySection = {};
+  for (const section of PROVINCIAL_SECTIONS) bySection[section.code] = 0;
+  for (const record of records || []) {
+    bySection[record.seccion_codigo] = (bySection[record.seccion_codigo] || 0) + 1;
+  }
+  const result = {
+    build: window.__SIGEP_PORTAL_BUILD__,
+    total: (records || []).length,
+    fichasProvinciales: (records || []).filter((r) => !r.es_relacion_ex_oficio && !r.es_ficha_adicional).length,
+    relacionesExOficio: (records || []).filter((r) => r.es_relacion_ex_oficio === true).length,
+    fichasAdicionales: (records || []).filter((r) => r.es_ficha_adicional === true).length,
+    ocupadas: (records || []).filter((r) => r.nombre_completo).length,
+    porSeccion: bySection
+  };
+  window.__SIGEP_PROVINCIA_DIAGNOSTICO__ = result;
+  console.info("SIGEP Provincia diagnóstico verificable:", result);
+  return result;
+}
+
+async function loadProvincialRecords(structureCode) {
+  const { data: rawPayload, error } = await supabase.rpc(
+    "sigep_portal_listar_estructura_provincial",
+    { p_estructura_codigo: structureCode }
+  );
+
+  // No usar la vista directa como fallback. La vista puede devolver solo las
+  // relaciones ex oficio bajo RLS y ocultar silenciosamente las fichas A/C/D/E/G.
+  if (error) {
+    throw new Error(`RPC_PROVINCIAL_FALLIDA: ${error.message}`);
+  }
+
+  let payload = rawPayload;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      throw new Error("RPC_PROVINCIAL_INVALIDA: el backend devolvió JSON no interpretable.");
+    }
+  }
+
+  // Compatibilidad defensiva si PostgREST envolviera el objeto en un arreglo.
+  if (Array.isArray(payload) && payload.length === 1 && payload[0]?.registros) {
+    payload = payload[0];
+  }
+
+  if (!payload || payload.ok !== true) {
+    throw new Error(
+      payload?.mensaje ||
+      payload?.codigo_resultado ||
+      "RPC_PROVINCIAL_RECHAZADA: el backend no autorizó la lectura."
+    );
+  }
+
+  const rows = Array.isArray(payload.registros) ? payload.registros : [];
+  if (!rows.length) {
+    throw new Error(
+      "RPC_PROVINCIAL_SIN_FILAS: la función respondió correctamente, pero no devolvió fichas."
+    );
+  }
+
+  const backendTotal = Number(payload.conteos?.total_visible ?? rows.length);
+  if (backendTotal !== rows.length) {
+    throw new Error(
+      `RPC_PROVINCIAL_INCONSISTENTE: backend=${backendTotal}, navegador=${rows.length}.`
+    );
+  }
+
+  const diagnostic = provincialDiagnostic(rows);
+  diagnostic.rpcVersion = payload.version || null;
+  diagnostic.backendCounts = payload.conteos || null;
+  diagnostic.structureCode = structureCode;
+  window.__SIGEP_PROVINCIA_DIAGNOSTICO__ = diagnostic;
+
+  console.info("SIGEP Provincia RPC cargada:", {
+    build: window.__SIGEP_PORTAL_BUILD__,
+    rpcVersion: diagnostic.rpcVersion,
+    total: rows.length,
+    porSeccion: diagnostic.porSeccion
+  });
+
+  return rows;
+}
+
 function editableFieldsForSelectedStructure() {
   return isProvincialStructure()
     ? [...EDITABLE_FIELDS, ...PROVINCIAL_EDITABLE_FIELDS]
@@ -906,26 +990,66 @@ async function loadZonalAuthorities(regionStructure) {
     }));
 }
 
+function resetProvincialFiltersToCompleteView() {
+  state.provincialFilters.sections = new Set(
+    PROVINCIAL_SECTIONS.map((section) => section.code)
+  );
+  state.provincialFilters.conformation = "ESTRUCTURA_COMPLETA";
+
+  if (els.provincialSectionFilters) {
+    for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) {
+      input.checked = true;
+    }
+  }
+  if (els.provincialConformationFilter) {
+    els.provincialConformationFilter.value = "ESTRUCTURA_COMPLETA";
+  }
+}
+
 async function selectStructure(structureCode) {
   const structure = state.structures.find((item) => item.estructura_codigo === structureCode);
   if (!structure) return;
 
   state.selectedStructure = structure;
+  if (isProvincialStructure(structure)) {
+    resetProvincialFiltersToCompleteView();
+  }
   renderStructureList();
   renderTerritorialHeader();
   els.recordsGrid.innerHTML = `<div class="loading full-span">Cargando ${isRegionalStructure(structure) ? "la estructura regional" : "los cargos"}…</div>`;
 
-  const query = supabase
-    .from(isProvincialStructure(structure) ? "v_sigep_provincia_estructura" : "v_fichas_portal")
-    .select("*")
-    .eq("estructura_codigo", structureCode);
+  let data = [];
+  try {
+    if (isProvincialStructure(structure)) {
+      data = await loadProvincialRecords(structureCode);
+    } else {
+      const result = await supabase
+        .from("v_fichas_portal")
+        .select("*")
+        .eq("estructura_codigo", structureCode)
+        .order("orden_cargo");
+      if (result.error) throw result.error;
+      data = result.data || [];
+    }
+  } catch (error) {
+    state.records = [];
+    els.recordsGrid.innerHTML = `
+      <div class="empty-card full-span provincial-load-error">
+        <strong>No se pudieron cargar las fichas provinciales</strong>
+        <span>${escapeHtml(error.message || "Error de lectura provincial.")}</span>
+        <span>La migración confirmó que las fichas originales siguen preservadas; este error corresponde a la ruta de lectura del portal.</span>
+      </div>`;
+    els.cargoToolbarText.textContent = "Error verificable de lectura provincial. Revise el mensaje mostrado.";
+    throw error;
+  }
 
-  const { data, error } = isProvincialStructure(structure)
-    ? await query.order("seccion_orden").order("orden_en_seccion")
-    : await query.order("orden_cargo");
-
-  if (error) throw error;
-  state.records = data || [];
+  state.records = data;
+  if (isProvincialStructure(structure) && state.records.length !== 92) {
+    console.warn(
+      `SIGEP Provincia: se esperaban 92 elementos en esta versión y llegaron ${state.records.length}.`,
+      window.__SIGEP_PROVINCIA_DIAGNOSTICO__
+    );
+  }
   await loadZonalAuthorities(structure);
   updateProvincialControlsVisibility();
 
@@ -1038,9 +1162,12 @@ function renderProvincialRecordCards() {
         const comment = record.comentario
           ? `<p class="record-comment"><strong>Comentario:</strong> ${escapeHtml(record.comentario)}</p>`
           : "";
+        const editableActionLabel = record.es_ficha_adicional === true && !record.nombre_completo
+          ? "Agregar senador"
+          : "Abrir y editar ficha";
         const action = record.es_relacion_ex_oficio
           ? `<div class="readonly-note">Ficha vinculada automáticamente${origin ? ` desde ${escapeHtml(origin)}` : ""}. No se duplica ni se edita desde Provincia.</div>`
-          : `<button class="button ${canEditSelectedTerritory() ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">${canEditSelectedTerritory() ? "Abrir y editar ficha" : "Consultar ficha"}</button>`;
+          : `<button class="button ${canEditSelectedTerritory() ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">${canEditSelectedTerritory() ? editableActionLabel : "Consultar ficha"}</button>`;
 
         return `
           <article class="record-card provincial-record-card ${record.es_relacion_ex_oficio ? "linked-record" : ""}">
@@ -1301,6 +1428,7 @@ function openRecord(recordId) {
     ["Sección", record.seccion_titulo ? `${record.seccion_letra}. ${record.seccion_titulo}` : null],
     ["Base normativa", record.referencia_normativa],
     ["Cargo", record.cargo],
+    ["Tipo de ficha", record.es_ficha_adicional === true ? "Cargo condicional adicional" : null],
     ["Cargo histórico", record.cargo_original && record.cargo_original !== record.cargo ? record.cargo_original : null]
   ].filter(([, value]) => value);
 
@@ -1392,8 +1520,12 @@ async function saveRecord(event) {
   }
 
   try {
+    const updateRpc = state.selectedRecord.es_ficha_adicional === true
+      ? "sigep_portal_actualizar_ficha_adicional"
+      : (isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha");
+
     const { data, error } = await supabase.rpc(
-      isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha",
+      updateRpc,
       {
         p_id_registro: state.selectedRecord.id_registro,
         p_cedula: cleanText(formData.get("cedula")),
@@ -1469,7 +1601,7 @@ function exportSummaryCsv() {
           record.cargo,
           record.nombre_completo || "",
           formatCedulaDisplay(record.cedula || ""),
-          record.es_relacion_ex_oficio ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION EX OFICIO") : "FICHA PROVINCIAL",
+          record.es_relacion_ex_oficio ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION EX OFICIO") : (record.es_ficha_adicional ? "FICHA ADICIONAL" : "FICHA PROVINCIAL"),
           record.comentario || ""
         ])
       ]
@@ -2265,16 +2397,24 @@ function bindProvincialInterface() {
   });
   els.provincialConformationFilter?.addEventListener("change", () => {
     state.provincialFilters.conformation = els.provincialConformationFilter.value;
+    // Una conformación debe mostrar todos sus integrantes aunque antes se hubiera
+    // seleccionado una sola sección. Luego el usuario puede volver a refinar.
+    for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+    state.provincialFilters.sections = new Set(PROVINCIAL_SECTIONS.map((section) => section.code));
     rerenderProvincialViews();
   });
   els.provincialSelectAll?.addEventListener("click", () => {
     for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
     state.provincialFilters.sections = new Set(PROVINCIAL_SECTIONS.map((section) => section.code));
+    state.provincialFilters.conformation = "ESTRUCTURA_COMPLETA";
+    els.provincialConformationFilter.value = "ESTRUCTURA_COMPLETA";
     rerenderProvincialViews();
   });
   els.provincialSelectNone?.addEventListener("click", () => {
     for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = false;
     state.provincialFilters.sections = new Set();
+    state.provincialFilters.conformation = "ESTRUCTURA_COMPLETA";
+    els.provincialConformationFilter.value = "ESTRUCTURA_COMPLETA";
     rerenderProvincialViews();
   });
 
@@ -2422,35 +2562,3 @@ els.usersBody.addEventListener("click", async (event) => {
 els.permissionsBody.addEventListener("change", (event) => {
   const row = event.target.closest("tr[data-territory-code]");
   if (!row) return;
-  const view = row.querySelector(".permission-view");
-  const edit = row.querySelector(".permission-edit");
-  if (event.target === view) {
-    edit.disabled = !view.checked;
-    if (!view.checked) edit.checked = false;
-  }
-  if (event.target === edit && edit.checked) view.checked = true;
-});
-
-els.savePermissions.addEventListener("click", savePermissions);
-els.closePermissions.addEventListener("click", () => els.permissionsModal.close());
-els.cancelPermissions.addEventListener("click", () => els.permissionsModal.close());
-els.passwordForm.addEventListener("submit", resetPassword);
-els.closePasswordModal.addEventListener("click", () => els.passwordModal.close());
-els.cancelPassword.addEventListener("click", () => els.passwordModal.close());
-els.refreshAudit.addEventListener("click", async () => {
-  try { await loadAudit(); } catch (error) { showMessage(error.message); }
-});
-els.auditBody.addEventListener("click", (event) => {
-  const button = event.target.closest(".audit-detail[data-audit-id]");
-  if (button) openAuditDetail(button.dataset.auditId);
-});
-els.closeAuditDetail.addEventListener("click", () => els.auditDetailModal.close());
-
-supabase.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_OUT") {
-    clearLoginContext();
-    window.location.replace("index.html");
-  }
-});
-
-await initialize();
