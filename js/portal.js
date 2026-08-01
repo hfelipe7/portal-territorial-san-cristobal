@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: NOMBRE_CEDULA_BACKEND_V1_3
+// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_SECCIONES_V1_0
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "NOMBRE_CEDULA_BACKEND_V1_3";
+window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_SECCIONES_V1_0";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -49,6 +49,32 @@ const REGIONAL_VISUAL_ORDER = new Map([
   ["REG_CARGO_01", 19], ["REG_CARGO_02", 20], ["REG_CARGO_03", 21]
 ]);
 
+const PROVINCIAL_SECTIONS = [
+  { code: "A_COMITE_PROVINCIAL", letter: "A", title: "Comité Provincial", subtitle: "Dirección del Comité Provincial", reference: "Artículos 103, 104 y 105" },
+  { code: "B_MIEMBROS_EX_OFICIO", letter: "B", title: "Miembros Provinciales Ex Oficio", subtitle: "Integración automática desde municipios y distritos municipales", reference: "Artículo 104" },
+  { code: "C_CLED_PROVINCIAL", letter: "C", title: "Comisión Local de Ética y Disciplina Provincial", subtitle: "Comisión Local de Ética y Disciplina", reference: "Artículo 60" },
+  { code: "D_CARGOS_FUNCIONALES", letter: "D", title: "Cargos Funcionales Provinciales", subtitle: "Actas, correspondencia y fiscalía disciplinaria", reference: "Artículos 61 y 176" },
+  { code: "E_COMISION_EJECUTIVA", letter: "E", title: "Comisión Ejecutiva Provincial", subtitle: "Comisión Ejecutiva del organismo territorial", reference: "Artículos 95, 96 y 97" },
+  { code: "F_REPRESENTACION_SENATORIAL", letter: "F", title: "Representación Senatorial", subtitle: "Cuando el partido tenga un senador en la provincia", reference: "Sección institucional SIGEP" },
+  { code: "G_MIEMBRO_NO_ESTATUTARIO", letter: "G", title: "Miembros — No Estatutaria", subtitle: "Preservación de fichas históricas y cargos no clasificados", reference: "Sección de preservación de datos" }
+];
+
+const PROVINCIAL_SECTION_BY_CODE = new Map(
+  PROVINCIAL_SECTIONS.map((section, index) => [section.code, { ...section, order: index + 1 }])
+);
+
+const PROVINCIAL_CONFORMATIONS = [
+  { value: "ESTRUCTURA_COMPLETA", label: "Estructura provincial completa" },
+  { value: "COMITE_PROVINCIAL", label: "Comité Provincial — artículo 104" },
+  { value: "COMISION_EJECUTIVA", label: "Comisión Ejecutiva Provincial — artículos 95 y 96" },
+  { value: "CLED_PROVINCIAL", label: "CLED Provincial — artículo 60" },
+  { value: "NO_ESTATUTARIOS", label: "Miembros no estatutarios" }
+];
+
+const PROVINCIAL_EDITABLE_FIELDS = [
+  ["comentario", "Comentario", "textarea"]
+];
+
 const state = {
   user: null,
   profile: null,
@@ -61,6 +87,16 @@ const state = {
   records: [],
   zonalAuthorities: [],
   selectedRecord: null,
+  provincialFilters: {
+    sections: new Set(PROVINCIAL_SECTIONS.map((section) => section.code)),
+    conformation: "ESTRUCTURA_COMPLETA"
+  },
+  provincialPrint: {
+    active: false,
+    sections: new Set(PROVINCIAL_SECTIONS.map((section) => section.code)),
+    conformation: "ESTRUCTURA_COMPLETA",
+    identifySections: true
+  },
   users: [],
   allAssignments: [],
   allRegionalAssignments: [],
@@ -164,6 +200,104 @@ const els = {
   closeAuditDetail: document.querySelector("#close-audit-detail")
 };
 
+function installProvincialInterface() {
+  const toolbar = document.querySelector("#structures-panel .content-toolbar");
+  if (toolbar && !document.querySelector("#provincial-controls")) {
+    toolbar.insertAdjacentHTML("afterend", `
+      <section id="provincial-controls" class="provincial-controls no-print" hidden>
+        <div class="provincial-controls-head">
+          <div>
+            <span class="provincial-kicker">Organización provincial</span>
+            <h3>Filtrar secciones y conformación</h3>
+            <p>La sección indica dónde pertenece la ficha; la conformación permite ver el Comité, la Comisión Ejecutiva, la CLED o la estructura completa.</p>
+          </div>
+          <div class="provincial-filter-actions">
+            <button id="provincial-select-all" class="button ghost small" type="button">Todas</button>
+            <button id="provincial-select-none" class="button ghost small" type="button">Ninguna</button>
+          </div>
+        </div>
+        <div id="provincial-section-filters" class="provincial-section-filters">
+          ${PROVINCIAL_SECTIONS.map((section) => `
+            <label class="provincial-check">
+              <input type="checkbox" value="${section.code}" checked>
+              <span><strong>${section.letter}. ${section.title}</strong><small>${section.subtitle}</small></span>
+            </label>
+          `).join("")}
+        </div>
+        <label class="field compact provincial-conformation-field">
+          <span>Conformación</span>
+          <select id="provincial-conformation-filter">
+            ${PROVINCIAL_CONFORMATIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("")}
+          </select>
+        </label>
+      </section>
+    `);
+  }
+
+  if (!document.querySelector("#provincial-print-modal")) {
+    document.body.insertAdjacentHTML("beforeend", `
+      <dialog id="provincial-print-modal" class="provincial-print-modal">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow blue">Configurar impresión</p>
+            <h2>Seleccionar secciones provinciales</h2>
+            <p>Puede imprimir todas las secciones o únicamente las que marque.</p>
+          </div>
+          <button id="close-provincial-print" class="close-button" type="button" aria-label="Cerrar">×</button>
+        </header>
+        <div class="modal-content">
+          <div class="provincial-print-actions">
+            <button id="print-select-all" class="button ghost small" type="button">Seleccionar todas</button>
+            <button id="print-select-none" class="button ghost small" type="button">Desmarcar todas</button>
+          </div>
+          <div id="provincial-print-sections" class="provincial-section-filters print-choices">
+            ${PROVINCIAL_SECTIONS.map((section) => `
+              <label class="provincial-check">
+                <input type="checkbox" value="${section.code}" checked>
+                <span><strong>${section.letter}. ${section.title}</strong><small>${section.reference}</small></span>
+              </label>
+            `).join("")}
+          </div>
+          <label class="field compact">
+            <span>Conformación a imprimir</span>
+            <select id="provincial-print-conformation">
+              ${PROVINCIAL_CONFORMATIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="provincial-toggle">
+            <input id="provincial-print-identify" type="checkbox" checked>
+            <span>Identificar las secciones con título, subtítulo y artículo</span>
+          </label>
+          <div id="provincial-print-count" class="message info">0 fichas seleccionadas.</div>
+        </div>
+        <footer class="modal-actions">
+          <button id="cancel-provincial-print" class="button ghost" type="button">Cancelar</button>
+          <button id="confirm-provincial-print" class="button" type="button">Imprimir selección</button>
+        </footer>
+      </dialog>
+    `);
+  }
+
+  Object.assign(els, {
+    provincialControls: document.querySelector("#provincial-controls"),
+    provincialSectionFilters: document.querySelector("#provincial-section-filters"),
+    provincialConformationFilter: document.querySelector("#provincial-conformation-filter"),
+    provincialSelectAll: document.querySelector("#provincial-select-all"),
+    provincialSelectNone: document.querySelector("#provincial-select-none"),
+    provincialPrintModal: document.querySelector("#provincial-print-modal"),
+    provincialPrintSections: document.querySelector("#provincial-print-sections"),
+    provincialPrintConformation: document.querySelector("#provincial-print-conformation"),
+    provincialPrintIdentify: document.querySelector("#provincial-print-identify"),
+    provincialPrintCount: document.querySelector("#provincial-print-count"),
+    printSelectAll: document.querySelector("#print-select-all"),
+    printSelectNone: document.querySelector("#print-select-none"),
+    confirmProvincialPrint: document.querySelector("#confirm-provincial-print"),
+    closeProvincialPrint: document.querySelector("#close-provincial-print"),
+    cancelProvincialPrint: document.querySelector("#cancel-provincial-print")
+  });
+}
+
+installProvincialInterface();
 els.appName.textContent = appName;
 
 function showMessage(text, type = "error", duration = 5200) {
@@ -414,11 +548,90 @@ function isRegionalStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "REGION";
 }
 
+function isProvincialStructure(item = state.selectedStructure) {
+  return String(item?.nivel_estructura || "").trim().toUpperCase() === "PROVINCIA";
+}
+
+function editableFieldsForSelectedStructure() {
+  return isProvincialStructure()
+    ? [...EDITABLE_FIELDS, ...PROVINCIAL_EDITABLE_FIELDS]
+    : EDITABLE_FIELDS;
+}
+
+function provincialSection(record) {
+  return PROVINCIAL_SECTION_BY_CODE.get(record?.seccion_codigo) || {
+    code: record?.seccion_codigo || "SIN_SECCION",
+    letter: record?.seccion_letra || "?",
+    title: record?.seccion_titulo || "Sin sección",
+    subtitle: record?.seccion_subtitulo || "Clasificación pendiente",
+    reference: record?.referencia_normativa || "",
+    order: Number(record?.seccion_orden || 99)
+  };
+}
+
+function matchesProvincialConformation(record, conformation) {
+  switch (conformation) {
+    case "COMITE_PROVINCIAL":
+      return record.integra_comite_provincial === true;
+    case "COMISION_EJECUTIVA":
+      return record.integra_comision_ejecutiva === true;
+    case "CLED_PROVINCIAL":
+      return record.integra_cled === true;
+    case "NO_ESTATUTARIOS":
+      return record.seccion_codigo === "G_MIEMBRO_NO_ESTATUTARIO";
+    default:
+      return true;
+  }
+}
+
+function provincialFilterState({ forPrint = false } = {}) {
+  if (forPrint && state.provincialPrint.active) {
+    return {
+      sections: state.provincialPrint.sections,
+      conformation: state.provincialPrint.conformation
+    };
+  }
+  return state.provincialFilters;
+}
+
+function provincialFilteredRecords(records = state.records, options = {}) {
+  const { sections, conformation } = provincialFilterState(options);
+  return [...records]
+    .filter((record) => sections.has(record.seccion_codigo))
+    .filter((record) => matchesProvincialConformation(record, conformation))
+    .sort((a, b) => {
+      const sectionDiff = Number(a.seccion_orden || 99) - Number(b.seccion_orden || 99);
+      if (sectionDiff) return sectionDiff;
+      const orderDiff = Number(a.orden_en_seccion || a.orden_cargo || 0) - Number(b.orden_en_seccion || b.orden_cargo || 0);
+      if (orderDiff) return orderDiff;
+      return String(a.id_registro || "").localeCompare(String(b.id_registro || ""));
+    });
+}
+
+function updateProvincialControlsVisibility() {
+  if (!els.provincialControls) return;
+  els.provincialControls.hidden = !isProvincialStructure();
+}
+
+function rerenderProvincialViews() {
+  renderRecordCards();
+  renderSummary();
+  updateMetrics();
+}
+
+function selectedCheckboxValues(container) {
+  return new Set(
+    [...container.querySelectorAll('input[type="checkbox"]:checked')]
+      .map((input) => input.value)
+  );
+}
+
 function regionalVisualOrder(record) {
   return REGIONAL_VISUAL_ORDER.get(record.cargo_codigo) ?? record.orden_cargo;
 }
 
 function visibleStructureRecords(records = state.records) {
+  if (isProvincialStructure()) return provincialFilteredRecords(records);
   if (!isRegionalStructure()) return records;
   return records
     .filter((record) => REGIONAL_CARGO_CODES.has(record.cargo_codigo))
@@ -583,6 +796,7 @@ async function loadStructures() {
   state.selectedStructure = null;
   state.records = [];
   state.zonalAuthorities = [];
+  updateProvincialControlsVisibility();
   renderTerritorialHeader();
   renderRecordCards();
   renderSummary();
@@ -701,15 +915,19 @@ async function selectStructure(structureCode) {
   renderTerritorialHeader();
   els.recordsGrid.innerHTML = `<div class="loading full-span">Cargando ${isRegionalStructure(structure) ? "la estructura regional" : "los cargos"}…</div>`;
 
-  const { data, error } = await supabase
-    .from("v_fichas_portal")
+  const query = supabase
+    .from(isProvincialStructure(structure) ? "v_sigep_provincia_estructura" : "v_fichas_portal")
     .select("*")
-    .eq("estructura_codigo", structureCode)
-    .order("orden_cargo");
+    .eq("estructura_codigo", structureCode);
+
+  const { data, error } = isProvincialStructure(structure)
+    ? await query.order("seccion_orden").order("orden_en_seccion")
+    : await query.order("orden_cargo");
 
   if (error) throw error;
   state.records = data || [];
   await loadZonalAuthorities(structure);
+  updateProvincialControlsVisibility();
 
   renderRecordCards();
   renderSummary();
@@ -756,8 +974,17 @@ function filteredRecords() {
   const term = els.recordSearch.value.trim().toLowerCase();
   if (!term) return baseRecords;
   return baseRecords.filter((record) =>
-    [record.cargo, record.nombre_completo, record.cedula, formatCedulaDisplay(record.cedula)]
-      .some((value) => String(value || "").toLowerCase().includes(term))
+    [
+      record.cargo,
+      record.cargo_original,
+      record.nombre_completo,
+      record.cedula,
+      formatCedulaDisplay(record.cedula),
+      record.comentario,
+      record.seccion_titulo,
+      record.origen_estructura_nombre,
+      record.origen_territorio_codigo
+    ].some((value) => String(value || "").toLowerCase().includes(term))
   );
 }
 
@@ -781,10 +1008,83 @@ function renderReadOnlyAuthorityCard(record, zone, label, visualNumber) {
   `;
 }
 
+function renderProvincialRecordCards() {
+  const records = filteredRecords();
+  const totalVisible = provincialFilteredRecords().length;
+  const searchActive = Boolean(els.recordSearch.value.trim());
+
+  els.cargoToolbarText.textContent = `${records.length} de ${totalVisible} fichas o relaciones mostradas · ${canEditSelectedTerritory() ? "Edición permitida en fichas provinciales" : "Solo lectura"}. Los miembros ex oficio se vinculan desde su territorio y no se duplican.`;
+
+  const grouped = new Map();
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) grouped.set(record.seccion_codigo, []);
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const currentFilters = provincialFilterState();
+  const selectedSections = currentFilters.sections;
+  const html = PROVINCIAL_SECTIONS
+    .filter((section) => selectedSections.has(section.code))
+    .map((section) => {
+      const sectionRecords = grouped.get(section.code) || [];
+      const showEmptyFutureSection = currentFilters.conformation === "ESTRUCTURA_COMPLETA" && section.code === "F_REPRESENTACION_SENATORIAL";
+      if (!sectionRecords.length && (searchActive || !showEmptyFutureSection)) return "";
+
+      const cards = sectionRecords.map((record) => {
+        const complete = Boolean(record.nombre_completo && record.cedula);
+        const origin = record.es_relacion_ex_oficio
+          ? [record.origen_nivel_estructura, record.origen_estructura_nombre || record.origen_territorio_codigo].filter(Boolean).join(" · ")
+          : "";
+        const comment = record.comentario
+          ? `<p class="record-comment"><strong>Comentario:</strong> ${escapeHtml(record.comentario)}</p>`
+          : "";
+        const action = record.es_relacion_ex_oficio
+          ? `<div class="readonly-note">Ficha vinculada automáticamente${origin ? ` desde ${escapeHtml(origin)}` : ""}. No se duplica ni se edita desde Provincia.</div>`
+          : `<button class="button ${canEditSelectedTerritory() ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">${canEditSelectedTerritory() ? "Abrir y editar ficha" : "Consultar ficha"}</button>`;
+
+        return `
+          <article class="record-card provincial-record-card ${record.es_relacion_ex_oficio ? "linked-record" : ""}">
+            <div class="record-card-top">
+              <span class="cargo-number">${String(record.orden_en_seccion || record.orden_cargo || "").padStart(2, "0")}</span>
+              <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
+            </div>
+            ${record.es_relacion_ex_oficio ? '<span class="relation-badge">Relación ex oficio</span>' : ""}
+            <h4>${escapeHtml(record.cargo)}</h4>
+            <div class="record-person ${record.nombre_completo ? "" : "empty"}">
+              <strong>${escapeHtml(record.nombre_completo || "Pendiente de completar")}</strong>
+              <span>${escapeHtml(record.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
+            </div>
+            ${comment}
+            ${action}
+          </article>
+        `;
+      }).join("");
+
+      return `
+        <div class="provincial-section-heading full-span" data-section-code="${section.code}">
+          <div>
+            <span class="provincial-section-kicker">Sección ${section.letter}</span>
+            <h3>${escapeHtml(section.title)}</h3>
+            <p>${escapeHtml(section.subtitle)} · ${escapeHtml(section.reference)}</p>
+          </div>
+          <span class="provincial-section-count">${sectionRecords.length} ficha${sectionRecords.length === 1 ? "" : "s"}</span>
+        </div>
+        ${cards || `<div class="empty-card full-span provincial-empty-section"><strong>Sin fichas activas en esta sección</strong><span>La sección se conserva disponible para futuras incorporaciones.</span></div>`}
+      `;
+    }).join("");
+
+  els.recordsGrid.innerHTML = html || '<div class="empty-card full-span"><strong>No se encontraron fichas</strong><span>Ajuste los filtros o el texto de búsqueda.</span></div>';
+}
+
 function renderRecordCards() {
   if (!state.selectedStructure) {
     els.recordsGrid.innerHTML = '<div class="empty-card full-span"><strong>Seleccione una estructura</strong><span>Luego podrá abrir y editar cada ficha autorizada.</span></div>';
     els.cargoToolbarText.textContent = "Seleccione una estructura para consultar sus cargos.";
+    return;
+  }
+
+  if (isProvincialStructure()) {
+    renderProvincialRecordCards();
     return;
   }
 
@@ -859,12 +1159,67 @@ function renderRecordCards() {
 
 function updateMetrics() {
   const records = visibleStructureRecords();
+  if (isProvincialStructure()) {
+    els.metricFilled.textContent = String(records.filter((record) => record.nombre_completo).length);
+    els.metricTotal.textContent = String(records.length);
+    return;
+  }
   const zonalRecords = isRegionalStructure()
     ? state.zonalAuthorities.flatMap((item) => [item.president, item.secretary]).filter(Boolean)
     : [];
   const filled = [...records, ...zonalRecords].filter((record) => record.nombre_completo).length;
   els.metricFilled.textContent = String(filled);
   els.metricTotal.textContent = String(records.length + zonalRecords.length);
+}
+
+function renderProvincialSummary() {
+  const item = state.selectedStructure;
+  const forPrint = state.provincialPrint.active;
+  const records = provincialFilteredRecords(state.records, { forPrint });
+  const identifySections = forPrint ? state.provincialPrint.identifySections : true;
+  const filterState = provincialFilterState({ forPrint });
+  const conformationLabel = PROVINCIAL_CONFORMATIONS.find((entry) => entry.value === filterState.conformation)?.label || "Estructura provincial completa";
+
+  els.summaryTitle.textContent = item.estructura_nombre;
+  els.summaryContext.textContent = `${records.length} fichas o relaciones · ${conformationLabel}.`;
+  els.summaryHeader.innerHTML = `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong><span>${escapeHtml(contextLine(item))}</span>`;
+
+  const grouped = new Map();
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) grouped.set(record.seccion_codigo, []);
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const rows = PROVINCIAL_SECTIONS
+    .filter((section) => filterState.sections.has(section.code))
+    .map((section) => {
+      const sectionRecords = grouped.get(section.code) || [];
+      if (!sectionRecords.length) return "";
+      const heading = identifySections ? `
+        <tr class="summary-section-row provincial-summary-section">
+          <td colspan="4">
+            <strong>${section.letter}. ${escapeHtml(section.title)}</strong>
+            <span>${escapeHtml(section.subtitle)} · ${escapeHtml(section.reference)}</span>
+          </td>
+        </tr>
+      ` : "";
+      const dataRows = sectionRecords.map((record) => {
+        const detail = record.es_relacion_ex_oficio
+          ? `Miembro ex oficio · ${record.origen_estructura_nombre || record.origen_territorio_codigo || "estructura de origen"}`
+          : record.comentario || "";
+        return `
+          <tr class="${record.es_relacion_ex_oficio ? "zonal-summary-row" : ""}">
+            <td>${escapeHtml(record.orden_en_seccion || record.orden_cargo || "")}</td>
+            <td><strong>${escapeHtml(record.cargo)}</strong>${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}</td>
+            <td>${escapeHtml(record.nombre_completo || "")}</td>
+            <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
+          </tr>
+        `;
+      }).join("");
+      return heading + dataRows;
+    }).join("");
+
+  els.summaryBody.innerHTML = rows || '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
 }
 
 function renderSummary() {
@@ -874,6 +1229,11 @@ function renderSummary() {
     els.summaryContext.textContent = "Muestra únicamente cargo, nombre y cédula.";
     els.summaryHeader.innerHTML = "";
     els.summaryBody.innerHTML = '<tr><td colspan="4" class="loading">Seleccione una estructura.</td></tr>';
+    return;
+  }
+
+  if (isProvincialStructure()) {
+    renderProvincialSummary();
     return;
   }
 
@@ -917,8 +1277,11 @@ function renderSummary() {
 }
 
 function openRecord(recordId) {
-  const record = state.records.find((item) => item.id_registro === recordId);
-  if (!record) return;
+  const record = state.records.find((item) => item.id_registro === recordId && item.es_relacion_ex_oficio !== true);
+  if (!record) {
+    showMessage("La relación ex oficio se consulta desde Provincia, pero la ficha se mantiene en su territorio de origen.", "info");
+    return;
+  }
   state.selectedRecord = record;
   hideLocalMessage(els.recordMessage);
 
@@ -935,14 +1298,17 @@ function openRecord(recordId) {
     ["Zona", record.zona],
     ["Código de recinto", record.codigo_recinto],
     ["Descripción de recinto", record.descripcion_recinto],
-    ["Cargo", record.cargo]
+    ["Sección", record.seccion_titulo ? `${record.seccion_letra}. ${record.seccion_titulo}` : null],
+    ["Base normativa", record.referencia_normativa],
+    ["Cargo", record.cargo],
+    ["Cargo histórico", record.cargo_original && record.cargo_original !== record.cargo ? record.cargo_original : null]
   ].filter(([, value]) => value);
 
   els.recordProtectedFields.innerHTML = protectedFields.map(([label, value]) => `
     <div class="protected-item"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>
   `).join("");
 
-  els.recordEditableFields.innerHTML = EDITABLE_FIELDS.map(([name, label, type]) => {
+  els.recordEditableFields.innerHTML = editableFieldsForSelectedStructure().map(([name, label, type]) => {
     const rawValue = record[name] || "";
     const value = name === "cedula"
       ? formatCedulaDisplay(rawValue)
@@ -1020,14 +1386,14 @@ async function saveRecord(event) {
 
   // El navegador no envía nombre_completo. El backend es la única autoridad
   // para fijar el nombre según la cédula.
-  for (const [name] of EDITABLE_FIELDS) {
+  for (const [name] of editableFieldsForSelectedStructure()) {
     if (name === "cedula" || name === "nombre_completo") continue;
     campos[name] = cleanText(formData.get(name));
   }
 
   try {
     const { data, error } = await supabase.rpc(
-      "sigep_portal_actualizar_ficha",
+      isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha",
       {
         p_id_registro: state.selectedRecord.id_registro,
         p_cedula: cleanText(formData.get("cedula")),
@@ -1085,20 +1451,36 @@ async function saveRecord(event) {
 }
 
 function exportSummaryCsv() {
-  const records = visibleStructureRecords();
+  const records = isProvincialStructure()
+    ? provincialFilteredRecords()
+    : visibleStructureRecords();
   if (!state.selectedStructure || !records.length) {
     showMessage("Seleccione una estructura antes de exportar.");
     return;
   }
 
-  const rows = [
-    ["ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN"],
-    ...records.map((record) => [
-      isRegionalStructure() ? regionalVisualOrder(record) : record.orden_cargo,
-      record.cargo, record.nombre_completo || "", formatCedulaDisplay(record.cedula || ""),
-      isRegionalStructure() ? "DIRECCION REGIONAL" : "ESTRUCTURA"
-    ])
-  ];
+  const provincial = isProvincialStructure();
+  const rows = provincial
+    ? [
+        ["SECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN", "COMENTARIO"],
+        ...records.map((record) => [
+          `${record.seccion_letra}. ${record.seccion_titulo}`,
+          record.orden_en_seccion || record.orden_cargo,
+          record.cargo,
+          record.nombre_completo || "",
+          formatCedulaDisplay(record.cedula || ""),
+          record.es_relacion_ex_oficio ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION EX OFICIO") : "FICHA PROVINCIAL",
+          record.comentario || ""
+        ])
+      ]
+    : [
+        ["ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN"],
+        ...records.map((record) => [
+          isRegionalStructure() ? regionalVisualOrder(record) : record.orden_cargo,
+          record.cargo, record.nombre_completo || "", formatCedulaDisplay(record.cedula || ""),
+          isRegionalStructure() ? "DIRECCION REGIONAL" : "ESTRUCTURA"
+        ])
+      ];
 
   if (isRegionalStructure()) {
     state.zonalAuthorities.forEach(({ zone, president, secretary }, index) => {
@@ -1837,6 +2219,88 @@ els.signOut.addEventListener("click", async () => {
 
 els.changePassword.addEventListener("click", () => window.location.assign("cambiar-contrasena.html"));
 
+function updateProvincialPrintCount() {
+  if (!els.provincialPrintSections || !els.provincialPrintCount) return;
+  const sections = selectedCheckboxValues(els.provincialPrintSections);
+  const conformation = els.provincialPrintConformation.value;
+  const count = state.records
+    .filter((record) => sections.has(record.seccion_codigo))
+    .filter((record) => matchesProvincialConformation(record, conformation))
+    .length;
+  els.provincialPrintCount.textContent = `${count} elemento${count === 1 ? "" : "s"} seleccionado${count === 1 ? "" : "s"}.`;
+  els.confirmProvincialPrint.disabled = count === 0;
+}
+
+function openProvincialPrintOptions() {
+  for (const input of els.provincialPrintSections.querySelectorAll('input[type="checkbox"]')) {
+    input.checked = state.provincialFilters.sections.has(input.value);
+  }
+  els.provincialPrintConformation.value = state.provincialFilters.conformation;
+  els.provincialPrintIdentify.checked = true;
+  updateProvincialPrintCount();
+  els.provincialPrintModal.showModal();
+}
+
+function executeProvincialPrint() {
+  const sections = selectedCheckboxValues(els.provincialPrintSections);
+  if (!sections.size) {
+    showMessage("Seleccione al menos una sección para imprimir.");
+    return;
+  }
+  state.provincialPrint = {
+    active: true,
+    sections,
+    conformation: els.provincialPrintConformation.value,
+    identifySections: els.provincialPrintIdentify.checked
+  };
+  renderSummary();
+  els.provincialPrintModal.close();
+  window.setTimeout(() => window.print(), 120);
+}
+
+function bindProvincialInterface() {
+  els.provincialSectionFilters?.addEventListener("change", () => {
+    state.provincialFilters.sections = selectedCheckboxValues(els.provincialSectionFilters);
+    rerenderProvincialViews();
+  });
+  els.provincialConformationFilter?.addEventListener("change", () => {
+    state.provincialFilters.conformation = els.provincialConformationFilter.value;
+    rerenderProvincialViews();
+  });
+  els.provincialSelectAll?.addEventListener("click", () => {
+    for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+    state.provincialFilters.sections = new Set(PROVINCIAL_SECTIONS.map((section) => section.code));
+    rerenderProvincialViews();
+  });
+  els.provincialSelectNone?.addEventListener("click", () => {
+    for (const input of els.provincialSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = false;
+    state.provincialFilters.sections = new Set();
+    rerenderProvincialViews();
+  });
+
+  els.provincialPrintSections?.addEventListener("change", updateProvincialPrintCount);
+  els.provincialPrintConformation?.addEventListener("change", updateProvincialPrintCount);
+  els.printSelectAll?.addEventListener("click", () => {
+    for (const input of els.provincialPrintSections.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+    updateProvincialPrintCount();
+  });
+  els.printSelectNone?.addEventListener("click", () => {
+    for (const input of els.provincialPrintSections.querySelectorAll('input[type="checkbox"]')) input.checked = false;
+    updateProvincialPrintCount();
+  });
+  els.confirmProvincialPrint?.addEventListener("click", executeProvincialPrint);
+  els.closeProvincialPrint?.addEventListener("click", () => els.provincialPrintModal.close());
+  els.cancelProvincialPrint?.addEventListener("click", () => els.provincialPrintModal.close());
+
+  window.addEventListener("afterprint", () => {
+    if (!state.provincialPrint.active) return;
+    state.provincialPrint.active = false;
+    renderSummary();
+  });
+}
+
+bindProvincialInterface();
+
 els.approvalsTab.addEventListener("click", () => {
   if (!state.isAdmin || els.approvalsTab.hidden) return;
 
@@ -1901,7 +2365,13 @@ els.recordsGrid.addEventListener("click", async (event) => {
 els.recordForm.addEventListener("submit", saveRecord);
 els.closeRecordModal.addEventListener("click", () => els.recordModal.close());
 els.cancelRecord.addEventListener("click", () => els.recordModal.close());
-els.printSummary.addEventListener("click", () => window.print());
+els.printSummary.addEventListener("click", () => {
+  if (isProvincialStructure()) {
+    openProvincialPrintOptions();
+  } else {
+    window.print();
+  }
+});
 els.exportSummary.addEventListener("click", exportSummaryCsv);
 
 els.createUserForm.addEventListener("submit", createUser);
