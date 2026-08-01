@@ -1,3 +1,4 @@
+// SIGEP PRM SC — PORTAL BUILD: NOMBRE_CEDULA_BACKEND_V1_3
 import {
   supabase,
   appName,
@@ -11,9 +12,12 @@ import {
   formatDate
 } from "./client.js";
 
+window.__SIGEP_PORTAL_BUILD__ = "NOMBRE_CEDULA_BACKEND_V1_3";
+console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
+
 const EDITABLE_FIELDS = [
-  ["nombre_completo", "Nombre completo", "text"],
-  ["cedula", "Cédula", "text"],
+  ["cedula", "Cédula", "cedula"],
+  ["nombre_completo", "Nombre completo", "readonly"],
   ["telefono_celular", "Teléfono celular", "tel"],
   ["telefono_celular_2", "Teléfono celular 2", "tel"],
   ["telefono_casa", "Teléfono de casa", "tel"],
@@ -66,7 +70,16 @@ const state = {
   selectedPermissionType: "TERRITORIAL",
   selectedUserId: null,
   passwordUserId: null,
-  auditRows: []
+  auditRows: [],
+  identityLookup: {
+    sequence: 0,
+    originalCedula: "",
+    originalName: "",
+    verifiedCedula: "",
+    verifiedName: "",
+    userChangedCedula: false,
+    timer: null
+  }
 };
 
 const els = {
@@ -171,6 +184,200 @@ function showLocalMessage(element, text, type = "error") {
 
 function hideLocalMessage(element) {
   element.hidden = true;
+}
+
+function cedulaDigits(value) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function formatCedulaDisplay(value) {
+  const original = String(value ?? "").trim();
+  const digits = cedulaDigits(original);
+
+  // No deformar silenciosamente valores históricos inválidos.
+  if (digits.length !== 11) return original;
+
+  return `${digits.slice(0, 3)}-${digits.slice(3, 10)}-${digits.slice(10)}`;
+}
+
+function formatCedulaInput(value) {
+  const digits = cedulaDigits(value).slice(0, 11);
+
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+
+  return `${digits.slice(0, 3)}-${digits.slice(3, 10)}-${digits.slice(10)}`;
+}
+
+function getRecordIdentityInputs() {
+  const cedulaInput = els.recordForm.elements.namedItem("cedula");
+  const nombreInput = els.recordForm.elements.namedItem("nombre_completo");
+
+  return {
+    cedulaInput: cedulaInput instanceof HTMLInputElement ? cedulaInput : null,
+    nombreInput: nombreInput instanceof HTMLInputElement ? nombreInput : null
+  };
+}
+
+async function resolveRecordNameByCedula({ silent = false, force = false } = {}) {
+  if (!state.selectedRecord || !canEditSelectedTerritory()) return null;
+
+  const { cedulaInput, nombreInput } = getRecordIdentityInputs();
+  if (!cedulaInput || !nombreInput) return null;
+
+  const digits = cedulaDigits(cedulaInput.value).slice(0, 11);
+
+  if (digits.length !== 11) {
+    state.identityLookup.verifiedCedula = "";
+    state.identityLookup.verifiedName = "";
+
+    if (state.identityLookup.userChangedCedula) {
+      nombreInput.value = "";
+    }
+
+    return null;
+  }
+
+  if (
+    !force &&
+    state.identityLookup.verifiedCedula === digits &&
+    state.identityLookup.verifiedName
+  ) {
+    return {
+      ok: true,
+      cedula_normalizada: digits,
+      cedula_formateada: formatCedulaDisplay(digits),
+      nombre_completo: state.identityLookup.verifiedName
+    };
+  }
+
+  const requestSequence = ++state.identityLookup.sequence;
+  const previousName = nombreInput.value;
+  nombreInput.placeholder = "Consultando nombre oficial…";
+
+  try {
+    const { data, error } = await supabase.rpc(
+      "sigep_portal_buscar_nombre_por_cedula",
+      {
+        p_id_registro: state.selectedRecord.id_registro,
+        p_cedula: digits
+      }
+    );
+
+    if (requestSequence !== state.identityLookup.sequence) return null;
+    if (error) throw error;
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    if (!row?.ok || !row?.nombre_completo) {
+      state.identityLookup.verifiedCedula = "";
+      state.identityLookup.verifiedName = "";
+
+      nombreInput.value = state.identityLookup.userChangedCedula
+        ? ""
+        : state.identityLookup.originalName;
+
+      if (!silent) {
+        showLocalMessage(
+          els.recordMessage,
+          row?.mensaje || "No fue posible localizar la cédula.",
+          "error"
+        );
+      }
+
+      return null;
+    }
+
+    state.identityLookup.verifiedCedula = row.cedula_normalizada;
+    state.identityLookup.verifiedName = row.nombre_completo;
+
+    cedulaInput.value =
+      row.cedula_formateada || formatCedulaInput(row.cedula_normalizada);
+    nombreInput.value = row.nombre_completo;
+
+    if (!silent) {
+      showLocalMessage(
+        els.recordMessage,
+        "Nombre oficial localizado por la cédula.",
+        "success"
+      );
+    }
+
+    return row;
+  } catch (error) {
+    if (requestSequence !== state.identityLookup.sequence) return null;
+
+    state.identityLookup.verifiedCedula = "";
+    state.identityLookup.verifiedName = "";
+
+    nombreInput.value = state.identityLookup.userChangedCedula
+      ? ""
+      : previousName || state.identityLookup.originalName;
+
+    if (!silent) {
+      showLocalMessage(
+        els.recordMessage,
+        error?.message || "No fue posible consultar el nombre oficial.",
+        "error"
+      );
+    }
+
+    return null;
+  } finally {
+    nombreInput.placeholder = "";
+  }
+}
+
+function bindRecordIdentityLookup() {
+  const { cedulaInput, nombreInput } = getRecordIdentityInputs();
+  if (!cedulaInput || !nombreInput) return;
+
+  nombreInput.readOnly = true;
+  nombreInput.disabled = true;
+  nombreInput.setAttribute("aria-readonly", "true");
+  nombreInput.setAttribute("aria-disabled", "true");
+  nombreInput.title = "El nombre se obtiene automáticamente desde la base maestra.";
+
+  if (!canEditSelectedTerritory()) return;
+
+  cedulaInput.inputMode = "numeric";
+  cedulaInput.maxLength = 13;
+  cedulaInput.autocomplete = "off";
+
+  cedulaInput.addEventListener("input", () => {
+    cedulaInput.value = formatCedulaInput(cedulaInput.value);
+
+    const digits = cedulaDigits(cedulaInput.value);
+    const originalDigits = cedulaDigits(state.identityLookup.originalCedula);
+
+    state.identityLookup.userChangedCedula = digits !== originalDigits;
+    state.identityLookup.verifiedCedula = "";
+    state.identityLookup.verifiedName = "";
+
+    if (state.identityLookup.userChangedCedula) {
+      nombreInput.value = "";
+    } else {
+      nombreInput.value = state.identityLookup.originalName;
+    }
+
+    hideLocalMessage(els.recordMessage);
+    window.clearTimeout(state.identityLookup.timer);
+
+    if (digits.length === 11) {
+      state.identityLookup.timer = window.setTimeout(() => {
+        resolveRecordNameByCedula({ silent: false });
+      }, 280);
+    }
+  });
+
+  cedulaInput.addEventListener("blur", () => {
+    const digits = cedulaDigits(cedulaInput.value);
+    if (digits.length === 11) {
+      resolveRecordNameByCedula({ silent: true });
+    }
+  });
 }
 
 function structureSubtitle(item) {
@@ -549,7 +756,7 @@ function filteredRecords() {
   const term = els.recordSearch.value.trim().toLowerCase();
   if (!term) return baseRecords;
   return baseRecords.filter((record) =>
-    [record.cargo, record.nombre_completo, record.cedula]
+    [record.cargo, record.nombre_completo, record.cedula, formatCedulaDisplay(record.cedula)]
       .some((value) => String(value || "").toLowerCase().includes(term))
   );
 }
@@ -566,7 +773,7 @@ function renderReadOnlyAuthorityCard(record, zone, label, visualNumber) {
       <h4>${escapeHtml(label)}</h4>
       <div class="record-person ${record?.nombre_completo ? "" : "empty"}">
         <strong>${escapeHtml(record?.nombre_completo || "Vacante / sin nombre")}</strong>
-        <span>${escapeHtml(record?.cedula ? `Cédula: ${record.cedula}` : "Sin cédula registrada")}</span>
+        <span>${escapeHtml(record?.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
       </div>
       <div class="readonly-note">Solo lectura desde la región</div>
       <button class="button ghost small open-zone no-print" type="button" data-zone-code="${escapeHtml(zone.estructura_codigo)}">Abrir zona para editar</button>
@@ -600,7 +807,7 @@ function renderRecordCards() {
         <h4>${escapeHtml(record.cargo)}</h4>
         <div class="record-person ${record.nombre_completo ? "" : "empty"}">
           <strong>${escapeHtml(record.nombre_completo || "Pendiente de completar")}</strong>
-          <span>${escapeHtml(record.cedula ? `Cédula: ${record.cedula}` : "Sin cédula registrada")}</span>
+          <span>${escapeHtml(record.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
         </div>
         <button class="button ${canEditSelectedTerritory() ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">
           ${canEditSelectedTerritory() ? "Abrir y editar ficha" : "Consultar ficha"}
@@ -617,8 +824,15 @@ function renderRecordCards() {
   const term = els.recordSearch.value.trim().toLowerCase();
   const authorities = state.zonalAuthorities.filter(({ zone, president, secretary }) => {
     if (!term) return true;
-    return [zone.estructura_nombre, president?.nombre_completo, secretary?.nombre_completo, president?.cedula, secretary?.cedula]
-      .some((value) => String(value || "").toLowerCase().includes(term));
+    return [
+      zone.estructura_nombre,
+      president?.nombre_completo,
+      secretary?.nombre_completo,
+      president?.cedula,
+      secretary?.cedula,
+      formatCedulaDisplay(president?.cedula),
+      formatCedulaDisplay(secretary?.cedula)
+    ].some((value) => String(value || "").toLowerCase().includes(term));
   });
 
   const authorityCards = authorities.map(({ zone, president, secretary }, index) => {
@@ -683,7 +897,7 @@ function renderSummary() {
       <td>${regional ? regionalVisualOrder(record) : record.orden_cargo}</td>
       <td><strong>${escapeHtml(record.cargo)}</strong></td>
       <td>${escapeHtml(record.nombre_completo || "")}</td>
-      <td>${escapeHtml(record.cedula || "")}</td>
+      <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
     </tr>
   `).join("");
 
@@ -694,7 +908,7 @@ function renderSummary() {
         <td>${order}</td>
         <td><strong>${escapeHtml(cargo)}</strong></td>
         <td>${escapeHtml(record?.nombre_completo || "VACANTE / SIN NOMBRE")}</td>
-        <td>${escapeHtml(record?.cedula || "SIN CÉDULA REGISTRADA")}</td>
+        <td>${escapeHtml(record?.cedula ? formatCedulaDisplay(record.cedula) : "SIN CÉDULA REGISTRADA")}</td>
       </tr>
     `).join("")}
   ` : "";
@@ -729,53 +943,141 @@ function openRecord(recordId) {
   `).join("");
 
   els.recordEditableFields.innerHTML = EDITABLE_FIELDS.map(([name, label, type]) => {
-    const value = record[name] || "";
+    const rawValue = record[name] || "";
+    const value = name === "cedula"
+      ? formatCedulaDisplay(rawValue)
+      : rawValue;
     const full = type === "textarea" ? "full" : "";
-    const input = type === "textarea"
-      ? `<textarea name="${name}" ${canEditSelectedTerritory() ? "" : "disabled"}>${escapeHtml(value)}</textarea>`
-      : `<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${canEditSelectedTerritory() ? "" : "disabled"}>`;
+    let input = "";
+
+    if (type === "textarea") {
+      input = `<textarea name="${name}" ${canEditSelectedTerritory() ? "" : "disabled"}>${escapeHtml(value)}</textarea>`;
+    } else if (type === "readonly" || name === "nombre_completo") {
+      input = `<input
+        name="${name}"
+        type="text"
+        value="${escapeHtml(value)}"
+        readonly
+        disabled
+        aria-readonly="true"
+        aria-disabled="true"
+        tabindex="-1"
+        autocomplete="off"
+        data-form-type="other"
+        data-lpignore="true"
+        data-1p-ignore="true"
+        title="El nombre se obtiene automáticamente desde la base maestra."
+        ${canEditSelectedTerritory() ? "" : "disabled"}
+      >`;
+    } else if (type === "cedula" || name === "cedula") {
+      input = `<input
+        name="${name}"
+        type="text"
+        inputmode="numeric"
+        maxlength="13"
+        autocomplete="off"
+        value="${escapeHtml(value)}"
+        ${canEditSelectedTerritory() ? "" : "disabled"}
+      >`;
+    } else {
+      input = `<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${canEditSelectedTerritory() ? "" : "disabled"}>`;
+    }
+
     return `<label class="field ${full}"><span>${escapeHtml(label)}</span>${input}</label>`;
   }).join("");
 
+  state.identityLookup.sequence += 1;
+  window.clearTimeout(state.identityLookup.timer);
+  state.identityLookup.originalCedula = record.cedula || "";
+  state.identityLookup.originalName = record.nombre_completo || "";
+  state.identityLookup.verifiedCedula = "";
+  state.identityLookup.verifiedName = "";
+  state.identityLookup.userChangedCedula = false;
+
+  bindRecordIdentityLookup();
+
   els.saveRecord.hidden = !canEditSelectedTerritory();
   els.recordModal.showModal();
+
+  if (
+    canEditSelectedTerritory() &&
+    cedulaDigits(record.cedula).length === 11
+  ) {
+    resolveRecordNameByCedula({ silent: true });
+  }
 }
 
 async function saveRecord(event) {
   event.preventDefault();
   if (!state.selectedRecord || !canEditSelectedTerritory()) return;
+
   hideLocalMessage(els.recordMessage);
   els.saveRecord.disabled = true;
   els.saveRecord.textContent = "Guardando…";
 
   const formData = new FormData(els.recordForm);
-  const updates = {};
+  const campos = {};
+
+  // El navegador no envía nombre_completo. El backend es la única autoridad
+  // para fijar el nombre según la cédula.
   for (const [name] of EDITABLE_FIELDS) {
-    updates[name] = cleanText(formData.get(name));
+    if (name === "cedula" || name === "nombre_completo") continue;
+    campos[name] = cleanText(formData.get(name));
   }
 
   try {
-    const { data, error } = await supabase
-      .from("registros")
-      .update(updates)
-      .eq("id_registro", state.selectedRecord.id_registro)
-      .select("id_registro,nombre_completo,cedula,telefono_celular,telefono_celular_2,telefono_casa,telefono_otro,direccion,whassapp,correo_eletronico,instagram,facebook,x,tiktok,actualizado_en")
-      .single();
+    const { data, error } = await supabase.rpc(
+      "sigep_portal_actualizar_ficha",
+      {
+        p_id_registro: state.selectedRecord.id_registro,
+        p_cedula: cleanText(formData.get("cedula")),
+        p_campos: campos
+      }
+    );
 
     if (error) throw error;
 
-    const index = state.records.findIndex((item) => item.id_registro === data.id_registro);
-    if (index >= 0) state.records[index] = { ...state.records[index], ...data };
-    state.selectedRecord = state.records[index];
+    const result = Array.isArray(data) ? data[0] : data;
+
+    if (!result?.ok || !result?.registro) {
+      throw new Error(
+        result?.mensaje || "El backend no pudo actualizar la ficha."
+      );
+    }
+
+    const updatedRecord = result.registro;
+    const index = state.records.findIndex(
+      (item) => item.id_registro === updatedRecord.id_registro
+    );
+
+    if (index >= 0) {
+      state.records[index] = {
+        ...state.records[index],
+        ...updatedRecord
+      };
+      state.selectedRecord = state.records[index];
+    }
 
     renderRecordCards();
     renderSummary();
     updateMetrics();
-    showLocalMessage(els.recordMessage, "Ficha actualizada correctamente.", "success");
-    showMessage("Los cambios fueron guardados y registrados en auditoría.", "success");
+
+    showLocalMessage(
+      els.recordMessage,
+      "Ficha actualizada correctamente.",
+      "success"
+    );
+    showMessage(
+      "El backend validó la cédula, fijó el nombre oficial y registró los cambios.",
+      "success"
+    );
+
     setTimeout(() => els.recordModal.close(), 650);
   } catch (error) {
-    showLocalMessage(els.recordMessage, error.message || "No se pudo guardar la ficha.");
+    showLocalMessage(
+      els.recordMessage,
+      error.message || "No se pudo guardar la ficha."
+    );
   } finally {
     els.saveRecord.disabled = false;
     els.saveRecord.textContent = "Guardar cambios";
@@ -793,15 +1095,15 @@ function exportSummaryCsv() {
     ["ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN"],
     ...records.map((record) => [
       isRegionalStructure() ? regionalVisualOrder(record) : record.orden_cargo,
-      record.cargo, record.nombre_completo || "", record.cedula || "",
+      record.cargo, record.nombre_completo || "", formatCedulaDisplay(record.cedula || ""),
       isRegionalStructure() ? "DIRECCION REGIONAL" : "ESTRUCTURA"
     ])
   ];
 
   if (isRegionalStructure()) {
     state.zonalAuthorities.forEach(({ zone, president, secretary }, index) => {
-      rows.push([22 + index * 2, `${zone.estructura_nombre} · Presidente(a) zonal`, president?.nombre_completo || "VACANTE / SIN NOMBRE", president?.cedula || "", "ZONA · SOLO LECTURA"]);
-      rows.push([23 + index * 2, `${zone.estructura_nombre} · Secretario(a) General zonal`, secretary?.nombre_completo || "VACANTE / SIN NOMBRE", secretary?.cedula || "", "ZONA · SOLO LECTURA"]);
+      rows.push([22 + index * 2, `${zone.estructura_nombre} · Presidente(a) zonal`, president?.nombre_completo || "VACANTE / SIN NOMBRE", formatCedulaDisplay(president?.cedula || ""), "ZONA · SOLO LECTURA"]);
+      rows.push([23 + index * 2, `${zone.estructura_nombre} · Secretario(a) General zonal`, secretary?.nombre_completo || "VACANTE / SIN NOMBRE", formatCedulaDisplay(secretary?.cedula || ""), "ZONA · SOLO LECTURA"]);
     });
   }
 
