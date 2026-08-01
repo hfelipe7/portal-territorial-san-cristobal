@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_RPC_V1_3_1_ARCHIVO_COMPLETO
+// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_Y_CIRCUNSCRIPCIONES_RPC_V1_4
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_RPC_V1_3_1_ARCHIVO_COMPLETO";
+window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_Y_CIRCUNSCRIPCIONES_RPC_V1_4";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -75,6 +75,51 @@ const PROVINCIAL_EDITABLE_FIELDS = [
   ["comentario", "Comentario", "textarea"]
 ];
 
+const CIRCUNSCRIPTION_SECTIONS = [
+  { code: "A_DIRECCION_CIRCUNSCRIPCION", letter: "A", title: "Dirección de la Circunscripción", subtitle: "Presidente(a) y Secretario(a) General", reference: "Artículo 106", order: 1 },
+  { code: "B_MIEMBROS_EX_OFICIO", letter: "B", title: "Miembros Ex Oficio", subtitle: "Presidentes municipales y distritales correspondientes", reference: "Artículo 106", order: 2 },
+  { code: "C_COMISION_OPERATIVA_NO_ESTATUTARIA", letter: "C", title: "Comisión Operativa — No Estatutaria", subtitle: "Estructura institucional de apoyo operativo", reference: "Configuración institucional SIGEP", order: 3 },
+  { code: "D_AUTORIDADES_ELECTAS", letter: "D", title: "Autoridades Electas", subtitle: "Diputados, alcaldes, directores distritales, regidores y vocales", reference: "Representación electiva", order: 4 },
+  { code: "E_MIEMBROS_NO_ESTATUTARIOS", letter: "E", title: "Miembros — No Estatutaria", subtitle: "Preservación de fichas actuales no clasificadas", reference: "Sección de preservación de datos", order: 5 }
+];
+
+const CIRCUNSCRIPTION_SECTION_BY_CODE = new Map(
+  CIRCUNSCRIPTION_SECTIONS.map((section) => [section.code, section])
+);
+
+const CIRCUNSCRIPTION_SUBSECTIONS = [
+  { code: "D1_DIPUTADOS_CIRCUNSCRIPCION", label: "D.1", title: "Diputados(as) de la Circunscripción", subtitle: "Fichas adicionales propias de la circunscripción", order: 1 },
+  { code: "D2_ALCALDES_DIRECTORES", label: "D.2", title: "Alcaldes Municipales y Directores(as) de Distrito Municipal del Partido", subtitle: "Relaciones automáticas desde municipios y distritos municipales", order: 2 },
+  { code: "D3_REGIDORES_VOCALES", label: "D.3", title: "Regidores(as) y Vocales del Partido", subtitle: "Relaciones automáticas futuras con identificación del rol de bloque", order: 3 }
+];
+
+const CIRCUNSCRIPTION_SUBSECTION_BY_CODE = new Map(
+  CIRCUNSCRIPTION_SUBSECTIONS.map((subsection) => [subsection.code, subsection])
+);
+
+const CIRCUNSCRIPTION_CONFORMATIONS = [
+  { value: "ESTRUCTURA_COMPLETA", label: "Estructura de Circunscripción completa" },
+  { value: "COMITE_ART_106", label: "Comité de Circunscripción — artículo 106" },
+  { value: "DIRECCION_ART_106", label: "Dirección de Circunscripción — artículo 106" },
+  { value: "COMISION_OPERATIVA", label: "Comisión Operativa completa — no estatutaria" },
+  { value: "AUTORIDADES_ELECTAS", label: "Autoridades Electas" },
+  { value: "DIPUTADOS", label: "Diputados(as) de la Circunscripción" },
+  { value: "ALCALDES_DIRECTORES", label: "Alcaldes y Directores Distritales del Partido" },
+  { value: "REGIDORES_VOCALES", label: "Regidores(as) y Vocales del Partido" },
+  { value: "EX_OFICIO", label: "Miembros Ex Oficio — artículo 106" },
+  { value: "MIEMBROS_NO_ESTATUTARIOS", label: "Miembros no estatutarios" }
+];
+
+const CIRCUNSCRIPTION_EDITABLE_FIELDS = [
+  ["comentario", "Comentario", "textarea"]
+];
+
+const CIRCUNSCRIPTION_DEPUTY_FIELDS = [
+  ["periodo_electoral", "Periodo electoral", "text"]
+];
+
+const CIRCUNSCRIPTION_DEPUTY_CAPACITY = new Map([[1, 4], [2, 3], [3, 3]]);
+
 const state = {
   user: null,
   profile: null,
@@ -96,6 +141,20 @@ const state = {
     sections: new Set(PROVINCIAL_SECTIONS.map((section) => section.code)),
     conformation: "ESTRUCTURA_COMPLETA",
     identifySections: true
+  },
+  circunscriptionFilters: {
+    sections: new Set(CIRCUNSCRIPTION_SECTIONS.map((section) => section.code)),
+    conformation: "ESTRUCTURA_COMPLETA"
+  },
+  circunscriptionPrint: {
+    active: false,
+    sections: new Set(CIRCUNSCRIPTION_SECTIONS.map((section) => section.code)),
+    conformation: "ESTRUCTURA_COMPLETA",
+    identifySections: true
+  },
+  circunscriptionBackend: {
+    version: null,
+    diagnostic: null
   },
   users: [],
   allAssignments: [],
@@ -297,7 +356,137 @@ function installProvincialInterface() {
   });
 }
 
+function installCircunscriptionInterface() {
+  if (!document.querySelector("#circunscription-inline-styles")) {
+    const style = document.createElement("style");
+    style.id = "circunscription-inline-styles";
+    style.textContent = `
+      .circ-subsection-heading{grid-column:1/-1;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:.9rem 1rem;border:1px solid #d9e4f2;border-radius:14px;background:#f8fbff;margin-top:.35rem}
+      .circ-subsection-heading h4{margin:.1rem 0 .25rem;font-size:1rem}.circ-subsection-heading p{margin:0;color:#5d6d82;font-size:.86rem}
+      .circ-subsection-label{display:inline-block;font-size:.72rem;font-weight:800;letter-spacing:.08em;color:#0b5cab;text-transform:uppercase}
+      .circ-admin-slots{margin-top:1rem;padding-top:1rem;border-top:1px solid #dfe7f1}.circ-admin-slots[hidden]{display:none}
+      .circ-slot-actions{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.7rem}.circ-slot-actions .button{min-width:145px}
+      .circ-relation-origin{display:block;margin:.35rem 0 .15rem;color:#5d6d82;font-size:.82rem}
+      .circ-role-badge,.circ-authority-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:.25rem .55rem;font-size:.72rem;font-weight:800;margin:.2rem 0 .45rem}
+      .circ-role-badge{background:#f2eaff;color:#6437a5}.circ-authority-badge{background:#e9f6ef;color:#137345}
+      .circ-placeholder{grid-column:1/-1}.circ-automatic-card{border-style:dashed}.circ-controls-note{margin:.35rem 0 0;color:#5d6d82;font-size:.86rem}
+    `;
+    document.head.appendChild(style);
+  }
+
+  const toolbar = document.querySelector("#structures-panel .content-toolbar");
+  if (toolbar && !document.querySelector("#circunscription-controls")) {
+    toolbar.insertAdjacentHTML("afterend", `
+      <section id="circunscription-controls" class="provincial-controls no-print" hidden>
+        <div class="provincial-controls-head">
+          <div>
+            <span class="provincial-kicker">Organización de circunscripción</span>
+            <h3>Filtrar secciones y conformación</h3>
+            <p>La dirección y el comité del artículo 106 se distinguen de la comisión operativa y las autoridades electas.</p>
+          </div>
+          <div class="provincial-filter-actions">
+            <button id="circunscription-select-all" class="button ghost small" type="button">Todas</button>
+            <button id="circunscription-select-none" class="button ghost small" type="button">Ninguna</button>
+          </div>
+        </div>
+        <div id="circunscription-section-filters" class="provincial-section-filters">
+          ${CIRCUNSCRIPTION_SECTIONS.map((section) => `
+            <label class="provincial-check">
+              <input type="checkbox" value="${section.code}" checked>
+              <span><strong>${section.letter}. ${section.title}</strong><small>${section.subtitle}</small></span>
+            </label>
+          `).join("")}
+        </div>
+        <label class="field compact provincial-conformation-field">
+          <span>Conformación</span>
+          <select id="circunscription-conformation-filter">
+            ${CIRCUNSCRIPTION_CONFORMATIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("")}
+          </select>
+        </label>
+        <div id="circunscription-deputy-admin" class="circ-admin-slots" hidden>
+          <strong>Administrar cupos de diputados</strong>
+          <p class="circ-controls-note">Los cupos son técnicos y solo se muestran cuando el administrador los habilita. Un cupo ocupado no puede retirarse.</p>
+          <div id="circunscription-deputy-slots" class="circ-slot-actions"></div>
+        </div>
+      </section>
+    `);
+  }
+
+  if (!document.querySelector("#circunscription-print-modal")) {
+    document.body.insertAdjacentHTML("beforeend", `
+      <dialog id="circunscription-print-modal" class="provincial-print-modal">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow blue">Configurar impresión</p>
+            <h2>Seleccionar secciones de la circunscripción</h2>
+            <p>Puede imprimir todas las secciones, una conformación o únicamente las que marque.</p>
+          </div>
+          <button id="close-circunscription-print" class="close-button" type="button" aria-label="Cerrar">×</button>
+        </header>
+        <div class="modal-content">
+          <div class="provincial-print-actions">
+            <button id="circ-print-select-all" class="button ghost small" type="button">Seleccionar todas</button>
+            <button id="circ-print-select-none" class="button ghost small" type="button">Desmarcar todas</button>
+          </div>
+          <div id="circunscription-print-sections" class="provincial-section-filters print-choices">
+            ${CIRCUNSCRIPTION_SECTIONS.map((section) => `
+              <label class="provincial-check">
+                <input type="checkbox" value="${section.code}" checked>
+                <span><strong>${section.letter}. ${section.title}</strong><small>${section.reference}</small></span>
+              </label>
+            `).join("")}
+          </div>
+          <label class="field compact">
+            <span>Conformación a imprimir</span>
+            <select id="circunscription-print-conformation">
+              ${CIRCUNSCRIPTION_CONFORMATIONS.map((item) => `<option value="${item.value}">${item.label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="provincial-toggle">
+            <input id="circunscription-print-identify" type="checkbox" checked>
+            <span>Identificar secciones y subsecciones con sus fundamentos</span>
+          </label>
+          <div id="circunscription-print-count" class="message info">0 fichas seleccionadas.</div>
+        </div>
+        <footer class="modal-actions">
+          <button id="cancel-circunscription-print" class="button ghost" type="button">Cancelar</button>
+          <button id="confirm-circunscription-print" class="button" type="button">Imprimir selección</button>
+        </footer>
+      </dialog>
+    `);
+  }
+
+  Object.assign(els, {
+    circunscriptionControls: document.querySelector("#circunscription-controls"),
+    circunscriptionSectionFilters: document.querySelector("#circunscription-section-filters"),
+    circunscriptionConformationFilter: document.querySelector("#circunscription-conformation-filter"),
+    circunscriptionSelectAll: document.querySelector("#circunscription-select-all"),
+    circunscriptionSelectNone: document.querySelector("#circunscription-select-none"),
+    circunscriptionDeputyAdmin: document.querySelector("#circunscription-deputy-admin"),
+    circunscriptionDeputySlots: document.querySelector("#circunscription-deputy-slots"),
+    circunscriptionPrintModal: document.querySelector("#circunscription-print-modal"),
+    circunscriptionPrintSections: document.querySelector("#circunscription-print-sections"),
+    circunscriptionPrintConformation: document.querySelector("#circunscription-print-conformation"),
+    circunscriptionPrintIdentify: document.querySelector("#circunscription-print-identify"),
+    circunscriptionPrintCount: document.querySelector("#circunscription-print-count"),
+    circPrintSelectAll: document.querySelector("#circ-print-select-all"),
+    circPrintSelectNone: document.querySelector("#circ-print-select-none"),
+    confirmCircunscriptionPrint: document.querySelector("#confirm-circunscription-print"),
+    closeCircunscriptionPrint: document.querySelector("#close-circunscription-print"),
+    cancelCircunscriptionPrint: document.querySelector("#cancel-circunscription-print")
+  });
+
+  if (els.assignmentType && !els.assignmentType.querySelector('option[value="CIRCUNSCRIPCION"]')) {
+    const option = document.createElement("option");
+    option.value = "CIRCUNSCRIPCION";
+    option.textContent = "CIRCUNSCRIPCIÓN";
+    const regionalOption = els.assignmentType.querySelector('option[value="REGIONAL"]');
+    els.assignmentType.insertBefore(option, regionalOption || null);
+  }
+}
+
 installProvincialInterface();
+installCircunscriptionInterface();
 els.appName.textContent = appName;
 
 function showMessage(text, type = "error", duration = 5200) {
@@ -356,7 +545,9 @@ function getRecordIdentityInputs() {
 }
 
 async function resolveRecordNameByCedula({ silent = false, force = false } = {}) {
-  if (!state.selectedRecord || !canEditSelectedTerritory()) return null;
+  if (!state.selectedRecord || !canEditRecord(state.selectedRecord)) return null;
+
+  if (isCircunscriptionStructure() && state.selectedRecord?.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION") return null;
 
   const { cedulaInput, nombreInput } = getRecordIdentityInputs();
   if (!cedulaInput || !nombreInput) return null;
@@ -474,7 +665,7 @@ function bindRecordIdentityLookup() {
   nombreInput.setAttribute("aria-disabled", "true");
   nombreInput.title = "El nombre se obtiene automáticamente desde la base maestra.";
 
-  if (!canEditSelectedTerritory()) return;
+  if (!canEditRecord(state.selectedRecord)) return;
 
   cedulaInput.inputMode = "numeric";
   cedulaInput.maxLength = 13;
@@ -550,6 +741,10 @@ function isRegionalStructure(item = state.selectedStructure) {
 
 function isProvincialStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "PROVINCIA";
+}
+
+function isCircunscriptionStructure(item = state.selectedStructure) {
+  return String(item?.nivel_estructura || "").trim().toUpperCase() === "CIRCUNSCRIPCION";
 }
 
 function provincialDiagnostic(records) {
@@ -636,10 +831,68 @@ async function loadProvincialRecords(structureCode) {
   return rows;
 }
 
-function editableFieldsForSelectedStructure() {
-  return isProvincialStructure()
-    ? [...EDITABLE_FIELDS, ...PROVINCIAL_EDITABLE_FIELDS]
-    : EDITABLE_FIELDS;
+function circunscriptionDiagnostic(records, payload = {}) {
+  const bySection = {};
+  for (const section of CIRCUNSCRIPTION_SECTIONS) bySection[section.code] = 0;
+  for (const record of records || []) {
+    bySection[record.seccion_codigo] = (bySection[record.seccion_codigo] || 0) + 1;
+  }
+  const result = {
+    build: window.__SIGEP_PORTAL_BUILD__,
+    rpcVersion: payload.version || null,
+    structureCode: payload.estructura?.estructura_codigo || state.selectedStructure?.estructura_codigo || null,
+    total: (records || []).length,
+    propias: (records || []).filter((r) => !r.es_relacion_automatica && !r.es_ficha_adicional).length,
+    relacionesAutomaticas: (records || []).filter((r) => r.es_relacion_automatica === true).length,
+    diputadosActivos: (records || []).filter((r) => r.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION").length,
+    ocupadas: (records || []).filter((r) => r.nombre_completo).length,
+    porSeccion: bySection,
+    backend: payload.diagnostico || null
+  };
+  window.__SIGEP_CIRCUNSCRIPCION_DIAGNOSTICO__ = result;
+  state.circunscriptionBackend.version = result.rpcVersion;
+  state.circunscriptionBackend.diagnostic = result;
+  console.info("SIGEP Circunscripción diagnóstico verificable:", result);
+  return result;
+}
+
+async function loadCircunscriptionRecords(structureCode) {
+  const { data: rawPayload, error } = await supabase.rpc(
+    "sigep_portal_listar_estructura_circunscripcion",
+    { p_estructura_codigo: structureCode }
+  );
+
+  if (error) throw new Error(`RPC_CIRCUNSCRIPCION_FALLIDA: ${error.message}`);
+
+  let payload = rawPayload;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload); }
+    catch { throw new Error("RPC_CIRCUNSCRIPCION_INVALIDA: el backend devolvió JSON no interpretable."); }
+  }
+  if (Array.isArray(payload) && payload.length === 1 && payload[0]?.rows) payload = payload[0];
+  if (!payload || payload.ok !== true) {
+    throw new Error(payload?.mensaje || payload?.codigo_resultado || "RPC_CIRCUNSCRIPCION_RECHAZADA: el backend no autorizó la lectura.");
+  }
+
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const backendTotal = Number(payload.diagnostico?.total_visible ?? rows.length);
+  if (backendTotal !== rows.length) {
+    throw new Error(`RPC_CIRCUNSCRIPCION_INCONSISTENTE: backend=${backendTotal}, navegador=${rows.length}.`);
+  }
+  circunscriptionDiagnostic(rows, payload);
+  return rows;
+}
+
+function editableFieldsForSelectedStructure(record = state.selectedRecord) {
+  const fields = [...EDITABLE_FIELDS];
+  if (isProvincialStructure()) fields.push(...PROVINCIAL_EDITABLE_FIELDS);
+  if (isCircunscriptionStructure()) {
+    fields.push(...CIRCUNSCRIPTION_EDITABLE_FIELDS);
+    if (record?.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION") {
+      fields.push(...CIRCUNSCRIPTION_DEPUTY_FIELDS);
+    }
+  }
+  return fields;
 }
 
 function provincialSection(record) {
@@ -692,9 +945,59 @@ function provincialFilteredRecords(records = state.records, options = {}) {
     });
 }
 
+function circunscriptionSection(record) {
+  return CIRCUNSCRIPTION_SECTION_BY_CODE.get(record?.seccion_codigo) || {
+    code: record?.seccion_codigo || "SIN_SECCION",
+    letter: record?.seccion_letra || "?",
+    title: record?.seccion_titulo || "Sin sección",
+    subtitle: record?.seccion_subtitulo || "Clasificación pendiente",
+    reference: record?.referencia_normativa || "",
+    order: Number(record?.seccion_orden || 99)
+  };
+}
+
+function matchesCircunscriptionConformation(record, conformation) {
+  switch (conformation) {
+    case "COMITE_ART_106": return record.integra_comite_art_106 === true;
+    case "DIRECCION_ART_106": return record.seccion_codigo === "A_DIRECCION_CIRCUNSCRIPCION";
+    case "COMISION_OPERATIVA": return record.integra_comision_operativa === true;
+    case "AUTORIDADES_ELECTAS": return record.seccion_codigo === "D_AUTORIDADES_ELECTAS";
+    case "DIPUTADOS": return record.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION";
+    case "ALCALDES_DIRECTORES": return record.subseccion_codigo === "D2_ALCALDES_DIRECTORES";
+    case "REGIDORES_VOCALES": return record.subseccion_codigo === "D3_REGIDORES_VOCALES";
+    case "EX_OFICIO": return record.seccion_codigo === "B_MIEMBROS_EX_OFICIO";
+    case "MIEMBROS_NO_ESTATUTARIOS": return record.seccion_codigo === "E_MIEMBROS_NO_ESTATUTARIOS";
+    default: return true;
+  }
+}
+
+function circunscriptionFilterState({ forPrint = false } = {}) {
+  if (forPrint && state.circunscriptionPrint.active) {
+    return { sections: state.circunscriptionPrint.sections, conformation: state.circunscriptionPrint.conformation };
+  }
+  return state.circunscriptionFilters;
+}
+
+function circunscriptionFilteredRecords(records = state.records, options = {}) {
+  const { sections, conformation } = circunscriptionFilterState(options);
+  return [...records]
+    .filter((record) => sections.has(record.seccion_codigo))
+    .filter((record) => matchesCircunscriptionConformation(record, conformation))
+    .sort((a, b) => {
+      const sectionDiff = Number(a.seccion_orden || 99) - Number(b.seccion_orden || 99);
+      if (sectionDiff) return sectionDiff;
+      const subsectionDiff = Number(a.subseccion_orden || 0) - Number(b.subseccion_orden || 0);
+      if (subsectionDiff) return subsectionDiff;
+      const orderDiff = Number(a.orden_en_seccion || a.orden_cargo || 0) - Number(b.orden_en_seccion || b.orden_cargo || 0);
+      if (orderDiff) return orderDiff;
+      return String(a.id_registro || "").localeCompare(String(b.id_registro || ""));
+    });
+}
+
 function updateProvincialControlsVisibility() {
-  if (!els.provincialControls) return;
-  els.provincialControls.hidden = !isProvincialStructure();
+  if (els.provincialControls) els.provincialControls.hidden = !isProvincialStructure();
+  if (els.circunscriptionControls) els.circunscriptionControls.hidden = !isCircunscriptionStructure();
+  renderCircunscriptionDeputyAdmin();
 }
 
 function rerenderProvincialViews() {
@@ -716,6 +1019,7 @@ function regionalVisualOrder(record) {
 
 function visibleStructureRecords(records = state.records) {
   if (isProvincialStructure()) return provincialFilteredRecords(records);
+  if (isCircunscriptionStructure()) return circunscriptionFilteredRecords(records);
   if (!isRegionalStructure()) return records;
   return records
     .filter((record) => REGIONAL_CARGO_CODES.has(record.cargo_codigo))
@@ -750,6 +1054,15 @@ function canEditSelectedTerritory() {
     assignment.puede_ver === true &&
     assignment.puede_editar === true
   );
+}
+
+function canEditRecord(record = state.selectedRecord) {
+  if (!record) return false;
+  if (isCircunscriptionStructure()) {
+    return canEditSelectedTerritory() && record.editable === true && record.es_relacion_automatica !== true;
+  }
+  if (isProvincialStructure() && record.es_relacion_ex_oficio === true) return false;
+  return canEditSelectedTerritory();
 }
 
 function setActiveTab(name) {
@@ -1006,14 +1319,24 @@ function resetProvincialFiltersToCompleteView() {
   }
 }
 
+function resetCircunscriptionFiltersToCompleteView() {
+  state.circunscriptionFilters.sections = new Set(
+    CIRCUNSCRIPTION_SECTIONS.map((section) => section.code)
+  );
+  state.circunscriptionFilters.conformation = "ESTRUCTURA_COMPLETA";
+  if (els.circunscriptionSectionFilters) {
+    for (const input of els.circunscriptionSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+  }
+  if (els.circunscriptionConformationFilter) els.circunscriptionConformationFilter.value = "ESTRUCTURA_COMPLETA";
+}
+
 async function selectStructure(structureCode) {
   const structure = state.structures.find((item) => item.estructura_codigo === structureCode);
   if (!structure) return;
 
   state.selectedStructure = structure;
-  if (isProvincialStructure(structure)) {
-    resetProvincialFiltersToCompleteView();
-  }
+  if (isProvincialStructure(structure)) resetProvincialFiltersToCompleteView();
+  if (isCircunscriptionStructure(structure)) resetCircunscriptionFiltersToCompleteView();
   renderStructureList();
   renderTerritorialHeader();
   els.recordsGrid.innerHTML = `<div class="loading full-span">Cargando ${isRegionalStructure(structure) ? "la estructura regional" : "los cargos"}…</div>`;
@@ -1022,6 +1345,8 @@ async function selectStructure(structureCode) {
   try {
     if (isProvincialStructure(structure)) {
       data = await loadProvincialRecords(structureCode);
+    } else if (isCircunscriptionStructure(structure)) {
+      data = await loadCircunscriptionRecords(structureCode);
     } else {
       const result = await supabase
         .from("v_fichas_portal")
@@ -1033,20 +1358,21 @@ async function selectStructure(structureCode) {
     }
   } catch (error) {
     state.records = [];
+    const scopeLabel = isProvincialStructure(structure) ? "provinciales" : (isCircunscriptionStructure(structure) ? "de circunscripción" : "territoriales");
     els.recordsGrid.innerHTML = `
       <div class="empty-card full-span provincial-load-error">
-        <strong>No se pudieron cargar las fichas provinciales</strong>
-        <span>${escapeHtml(error.message || "Error de lectura provincial.")}</span>
-        <span>La migración confirmó que las fichas originales siguen preservadas; este error corresponde a la ruta de lectura del portal.</span>
+        <strong>No se pudieron cargar las fichas ${scopeLabel}</strong>
+        <span>${escapeHtml(error.message || "Error de lectura territorial.")}</span>
+        <span>Los datos base permanecen preservados; este error corresponde a la ruta de lectura del portal.</span>
       </div>`;
-    els.cargoToolbarText.textContent = "Error verificable de lectura provincial. Revise el mensaje mostrado.";
+    els.cargoToolbarText.textContent = `Error verificable de lectura ${scopeLabel}. Revise el mensaje mostrado.`;
     throw error;
   }
 
   state.records = data;
-  if (isProvincialStructure(structure) && state.records.length !== 92) {
+  if (isProvincialStructure(structure) && state.records.length !== 91) {
     console.warn(
-      `SIGEP Provincia: se esperaban 92 elementos en esta versión y llegaron ${state.records.length}.`,
+      `SIGEP Provincia: se esperaban 91 elementos vigentes y llegaron ${state.records.length}.`,
       window.__SIGEP_PROVINCIA_DIAGNOSTICO__
     );
   }
@@ -1107,7 +1433,10 @@ function filteredRecords() {
       record.comentario,
       record.seccion_titulo,
       record.origen_estructura_nombre,
-      record.origen_territorio_codigo
+      record.origen_territorio_codigo,
+      record.tipo_autoridad,
+      record.periodo_electoral,
+      record.rol_bloque
     ].some((value) => String(value || "").toLowerCase().includes(term))
   );
 }
@@ -1203,6 +1532,153 @@ function renderProvincialRecordCards() {
   els.recordsGrid.innerHTML = html || '<div class="empty-card full-span"><strong>No se encontraron fichas</strong><span>Ajuste los filtros o el texto de búsqueda.</span></div>';
 }
 
+function circunscriptionConformationIncludesSection(sectionCode, conformation) {
+  switch (conformation) {
+    case "COMITE_ART_106": return ["A_DIRECCION_CIRCUNSCRIPCION", "B_MIEMBROS_EX_OFICIO"].includes(sectionCode);
+    case "DIRECCION_ART_106": return sectionCode === "A_DIRECCION_CIRCUNSCRIPCION";
+    case "COMISION_OPERATIVA": return ["A_DIRECCION_CIRCUNSCRIPCION", "C_COMISION_OPERATIVA_NO_ESTATUTARIA"].includes(sectionCode);
+    case "AUTORIDADES_ELECTAS":
+    case "DIPUTADOS":
+    case "ALCALDES_DIRECTORES":
+    case "REGIDORES_VOCALES": return sectionCode === "D_AUTORIDADES_ELECTAS";
+    case "EX_OFICIO": return sectionCode === "B_MIEMBROS_EX_OFICIO";
+    case "MIEMBROS_NO_ESTATUTARIOS": return sectionCode === "E_MIEMBROS_NO_ESTATUTARIOS";
+    default: return true;
+  }
+}
+
+function circunscriptionVisibleSubsections(conformation) {
+  if (conformation === "DIPUTADOS") return new Set(["D1_DIPUTADOS_CIRCUNSCRIPCION"]);
+  if (conformation === "ALCALDES_DIRECTORES") return new Set(["D2_ALCALDES_DIRECTORES"]);
+  if (conformation === "REGIDORES_VOCALES") return new Set(["D3_REGIDORES_VOCALES"]);
+  return new Set(CIRCUNSCRIPTION_SUBSECTIONS.map((item) => item.code));
+}
+
+function circunscriptionDisplayCargo(record) {
+  if (record.subseccion_codigo === "D2_ALCALDES_DIRECTORES") {
+    return record.tipo_autoridad === "ALCALDE"
+      ? "Alcalde Municipal del Partido"
+      : "Director(a) de Distrito Municipal del Partido";
+  }
+  return record.cargo;
+}
+
+function circunscriptionRecordCard(record) {
+  const complete = Boolean(record.nombre_completo && record.cedula);
+  const automatic = record.es_relacion_automatica === true;
+  const origin = automatic
+    ? [record.origen_nivel_estructura, record.origen_estructura_nombre || record.origen_territorio_codigo].filter(Boolean).join(" · ")
+    : "";
+  const comment = record.comentario
+    ? `<p class="record-comment"><strong>Comentario:</strong> ${escapeHtml(record.comentario)}</p>`
+    : "";
+  const authorityBadge = record.tipo_autoridad
+    ? `<span class="circ-authority-badge">${escapeHtml(record.tipo_autoridad === "DIRECTOR_DISTRITAL" ? "Director distrital" : record.tipo_autoridad)}</span>`
+    : "";
+  const roleBadge = record.rol_bloque
+    ? `<span class="circ-role-badge">${escapeHtml(record.rol_bloque === "VOCERO" ? "Vocero del bloque" : record.rol_bloque)}</span>`
+    : "";
+  const period = record.periodo_electoral
+    ? `<span class="circ-relation-origin">Periodo electoral: ${escapeHtml(record.periodo_electoral)}</span>`
+    : "";
+  const editable = canEditRecord(record);
+  let action = "";
+  if (automatic) {
+    action = `<div class="readonly-note">Relación automática${origin ? ` desde ${escapeHtml(origin)}` : ""}. Se edita únicamente en el territorio de origen.</div>`;
+  } else {
+    const label = record.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION" && !record.nombre_completo
+      ? "Completar diputado"
+      : (editable ? "Abrir y editar ficha" : "Consultar ficha");
+    action = `<button class="button ${editable ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">${label}</button>`;
+  }
+
+  const relationBadge = automatic
+    ? `<span class="relation-badge">${record.seccion_codigo === "B_MIEMBROS_EX_OFICIO" ? "Miembro ex oficio" : "Relación automática"}</span>`
+    : (record.es_ficha_adicional ? '<span class="relation-badge">Ficha adicional</span>' : "");
+
+  return `
+    <article class="record-card provincial-record-card ${automatic ? "linked-record circ-automatic-card" : ""}">
+      <div class="record-card-top">
+        <span class="cargo-number">${String(record.orden_en_seccion || record.orden_cargo || "").padStart(2, "0")}</span>
+        <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
+      </div>
+      ${relationBadge}
+      ${authorityBadge}${roleBadge}
+      <h4>${escapeHtml(circunscriptionDisplayCargo(record))}</h4>
+      ${origin ? `<span class="circ-relation-origin">${escapeHtml(origin)}</span>` : ""}
+      <div class="record-person ${record.nombre_completo ? "" : "empty"}">
+        <strong>${escapeHtml(record.nombre_completo || "Pendiente de completar")}</strong>
+        <span>${escapeHtml(record.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
+      </div>
+      ${period}${comment}${action}
+    </article>
+  `;
+}
+
+function renderCircunscriptionRecordCards() {
+  const records = filteredRecords();
+  const totalVisible = circunscriptionFilteredRecords().length;
+  const searchActive = Boolean(els.recordSearch.value.trim());
+  const currentFilters = circunscriptionFilterState();
+  const canEditAny = canEditSelectedTerritory();
+  els.cargoToolbarText.textContent = `${records.length} de ${totalVisible} fichas o relaciones mostradas · ${canEditAny ? "Edición permitida únicamente en fichas propias" : "Solo lectura"}. Las relaciones B, D.2 y D.3 no se editan desde la circunscripción.`;
+
+  const grouped = new Map();
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) grouped.set(record.seccion_codigo, []);
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const html = CIRCUNSCRIPTION_SECTIONS
+    .filter((section) => currentFilters.sections.has(section.code))
+    .filter((section) => circunscriptionConformationIncludesSection(section.code, currentFilters.conformation))
+    .map((section) => {
+      const sectionRecords = grouped.get(section.code) || [];
+      if (section.code !== "D_AUTORIDADES_ELECTAS" && !sectionRecords.length && searchActive) return "";
+
+      let body = "";
+      if (section.code === "D_AUTORIDADES_ELECTAS") {
+        const visibleSubsections = circunscriptionVisibleSubsections(currentFilters.conformation);
+        body = CIRCUNSCRIPTION_SUBSECTIONS
+          .filter((subsection) => visibleSubsections.has(subsection.code))
+          .map((subsection) => {
+            const subsectionRecords = sectionRecords.filter((record) => record.subseccion_codigo === subsection.code);
+            if (!subsectionRecords.length && searchActive) return "";
+            let placeholder = "";
+            if (!subsectionRecords.length && subsection.code === "D1_DIPUTADOS_CIRCUNSCRIPCION") {
+              placeholder = '<div class="empty-card circ-placeholder"><strong>No hay cupos de diputados habilitados</strong><span>El administrador provincial puede habilitar los cupos técnicos desde el panel superior.</span></div>';
+            } else if (!subsectionRecords.length && subsection.code === "D3_REGIDORES_VOCALES") {
+              placeholder = '<div class="empty-card circ-placeholder"><strong>Subsección preparada</strong><span>Se poblará automáticamente cuando existan fichas individuales de regidores y vocales en municipios y distritos. La ficha podrá identificar al vocero, vicevocero o secretario del bloque.</span></div>';
+            } else if (!subsectionRecords.length) {
+              placeholder = '<div class="empty-card circ-placeholder"><strong>Sin autoridades relacionadas</strong><span>No existen registros visibles para esta subsección.</span></div>';
+            }
+            return `
+              <div class="circ-subsection-heading">
+                <div><span class="circ-subsection-label">${subsection.label}</span><h4>${escapeHtml(subsection.title)}</h4><p>${escapeHtml(subsection.subtitle)}</p></div>
+                <span class="provincial-section-count">${subsectionRecords.length}</span>
+              </div>
+              ${subsectionRecords.map(circunscriptionRecordCard).join("") || placeholder}
+            `;
+          }).join("");
+      } else {
+        body = sectionRecords.map(circunscriptionRecordCard).join("");
+        if (!body && !searchActive) body = '<div class="empty-card full-span"><strong>Sin fichas visibles</strong><span>La sección permanece configurada.</span></div>';
+      }
+
+      if (!body) return "";
+      return `
+        <div class="provincial-section-heading full-span" data-section-code="${section.code}">
+          <div><span class="provincial-section-kicker">Sección ${section.letter}</span><h3>${escapeHtml(section.title)}</h3><p>${escapeHtml(section.subtitle)} · ${escapeHtml(section.reference)}</p></div>
+          <span class="provincial-section-count">${sectionRecords.length} elemento${sectionRecords.length === 1 ? "" : "s"}</span>
+        </div>
+        ${body}
+      `;
+    }).join("");
+
+  els.recordsGrid.innerHTML = html || '<div class="empty-card full-span"><strong>No se encontraron fichas</strong><span>Ajuste los filtros o el texto de búsqueda.</span></div>';
+  renderCircunscriptionDeputyAdmin();
+}
+
 function renderRecordCards() {
   if (!state.selectedStructure) {
     els.recordsGrid.innerHTML = '<div class="empty-card full-span"><strong>Seleccione una estructura</strong><span>Luego podrá abrir y editar cada ficha autorizada.</span></div>';
@@ -1212,6 +1688,10 @@ function renderRecordCards() {
 
   if (isProvincialStructure()) {
     renderProvincialRecordCards();
+    return;
+  }
+  if (isCircunscriptionStructure()) {
+    renderCircunscriptionRecordCards();
     return;
   }
 
@@ -1319,6 +1799,7 @@ function renderProvincialSummary() {
 
   const rows = PROVINCIAL_SECTIONS
     .filter((section) => filterState.sections.has(section.code))
+    .filter((section) => circunscriptionConformationIncludesSection(section.code, filterState.conformation))
     .map((section) => {
       const sectionRecords = grouped.get(section.code) || [];
       if (!sectionRecords.length) return "";
@@ -1349,6 +1830,64 @@ function renderProvincialSummary() {
   els.summaryBody.innerHTML = rows || '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
 }
 
+function renderCircunscriptionSummary() {
+  const item = state.selectedStructure;
+  const forPrint = state.circunscriptionPrint.active;
+  const records = circunscriptionFilteredRecords(state.records, { forPrint });
+  const identifySections = forPrint ? state.circunscriptionPrint.identifySections : true;
+  const filterState = circunscriptionFilterState({ forPrint });
+  const conformationLabel = CIRCUNSCRIPTION_CONFORMATIONS.find((entry) => entry.value === filterState.conformation)?.label || "Estructura de Circunscripción completa";
+
+  els.summaryTitle.textContent = item.estructura_nombre;
+  els.summaryContext.textContent = `${records.length} fichas o relaciones · ${conformationLabel}.`;
+  els.summaryHeader.innerHTML = `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong><span>${escapeHtml(contextLine(item))}</span>`;
+
+  const grouped = new Map();
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) grouped.set(record.seccion_codigo, []);
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const rows = CIRCUNSCRIPTION_SECTIONS
+    .filter((section) => filterState.sections.has(section.code))
+    .map((section) => {
+      const sectionRecords = grouped.get(section.code) || [];
+      if (!sectionRecords.length && section.code !== "D_AUTORIDADES_ELECTAS") return "";
+      const heading = identifySections ? `
+        <tr class="summary-section-row provincial-summary-section"><td colspan="4"><strong>${section.letter}. ${escapeHtml(section.title)}</strong><span>${escapeHtml(section.subtitle)} · ${escapeHtml(section.reference)}</span></td></tr>
+      ` : "";
+
+      if (section.code === "D_AUTORIDADES_ELECTAS") {
+        const visibleSubsections = circunscriptionVisibleSubsections(filterState.conformation);
+        const subsectionRows = CIRCUNSCRIPTION_SUBSECTIONS
+          .filter((subsection) => visibleSubsections.has(subsection.code))
+          .map((subsection) => {
+            const subset = sectionRecords.filter((record) => record.subseccion_codigo === subsection.code);
+            const subheading = identifySections ? `<tr class="summary-section-row"><td colspan="4"><strong>${subsection.label}. ${escapeHtml(subsection.title)}</strong><span>${escapeHtml(subsection.subtitle)}</span></td></tr>` : "";
+            const dataRows = subset.map((record) => {
+              const origin = record.es_relacion_automatica ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "Relación automática") : "";
+              const detail = [origin, record.periodo_electoral ? `Periodo ${record.periodo_electoral}` : "", record.rol_bloque || "", record.comentario || ""].filter(Boolean).join(" · ");
+              return `<tr class="${record.es_relacion_automatica ? "zonal-summary-row" : ""}"><td>${escapeHtml(record.orden_en_seccion || record.orden_cargo || "")}</td><td><strong>${escapeHtml(circunscriptionDisplayCargo(record))}</strong>${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}</td><td>${escapeHtml(record.nombre_completo || "")}</td><td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td></tr>`;
+            }).join("");
+            if (!subset.length && subsection.code === "D3_REGIDORES_VOCALES") {
+              return subheading + '<tr><td colspan="4" class="loading">Subsección preparada; pendiente del inventario individual de regidores y vocales.</td></tr>';
+            }
+            return subheading + dataRows;
+          }).join("");
+        return heading + subsectionRows;
+      }
+
+      const dataRows = sectionRecords.map((record) => {
+        const origin = record.es_relacion_automatica ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "Relación automática") : "";
+        const detail = [origin, record.comentario || ""].filter(Boolean).join(" · ");
+        return `<tr class="${record.es_relacion_automatica ? "zonal-summary-row" : ""}"><td>${escapeHtml(record.orden_en_seccion || record.orden_cargo || "")}</td><td><strong>${escapeHtml(circunscriptionDisplayCargo(record))}</strong>${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}</td><td>${escapeHtml(record.nombre_completo || "")}</td><td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td></tr>`;
+      }).join("");
+      return heading + dataRows;
+    }).join("");
+
+  els.summaryBody.innerHTML = rows || '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
+}
+
 function renderSummary() {
   const item = state.selectedStructure;
   if (!item) {
@@ -1361,6 +1900,10 @@ function renderSummary() {
 
   if (isProvincialStructure()) {
     renderProvincialSummary();
+    return;
+  }
+  if (isCircunscriptionStructure()) {
+    renderCircunscriptionSummary();
     return;
   }
 
@@ -1404,9 +1947,9 @@ function renderSummary() {
 }
 
 function openRecord(recordId) {
-  const record = state.records.find((item) => item.id_registro === recordId && item.es_relacion_ex_oficio !== true);
+  const record = state.records.find((item) => item.id_registro === recordId && item.es_relacion_ex_oficio !== true && item.es_relacion_automatica !== true);
   if (!record) {
-    showMessage("La relación ex oficio se consulta desde Provincia, pero la ficha se mantiene en su territorio de origen.", "info");
+    showMessage("Esta relación se consulta aquí, pero la ficha se mantiene y se edita en su territorio de origen.", "info");
     return;
   }
   state.selectedRecord = record;
@@ -1426,9 +1969,13 @@ function openRecord(recordId) {
     ["Código de recinto", record.codigo_recinto],
     ["Descripción de recinto", record.descripcion_recinto],
     ["Sección", record.seccion_titulo ? `${record.seccion_letra}. ${record.seccion_titulo}` : null],
+    ["Subsección", record.subseccion_titulo ? `${record.subseccion_etiqueta || ""} ${record.subseccion_titulo}`.trim() : null],
     ["Base normativa", record.referencia_normativa],
-    ["Cargo", record.cargo],
-    ["Tipo de ficha", record.es_ficha_adicional === true ? "Cargo condicional adicional" : null],
+    ["Cargo", circunscriptionDisplayCargo(record)],
+    ["Territorio de origen", record.origen_estructura_nombre || record.origen_territorio_codigo],
+    ["Tipo de autoridad", record.tipo_autoridad],
+    ["Rol dentro del bloque", record.rol_bloque],
+    ["Tipo de ficha", record.es_ficha_adicional === true ? "Ficha adicional" : null],
     ["Cargo histórico", record.cargo_original && record.cargo_original !== record.cargo ? record.cargo_original : null]
   ].filter(([, value]) => value);
 
@@ -1436,7 +1983,8 @@ function openRecord(recordId) {
     <div class="protected-item"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>
   `).join("");
 
-  els.recordEditableFields.innerHTML = editableFieldsForSelectedStructure().map(([name, label, type]) => {
+  const recordEditable = canEditRecord(record);
+  els.recordEditableFields.innerHTML = editableFieldsForSelectedStructure(record).map(([name, label, type]) => {
     const rawValue = record[name] || "";
     const value = name === "cedula"
       ? formatCedulaDisplay(rawValue)
@@ -1445,7 +1993,7 @@ function openRecord(recordId) {
     let input = "";
 
     if (type === "textarea") {
-      input = `<textarea name="${name}" ${canEditSelectedTerritory() ? "" : "disabled"}>${escapeHtml(value)}</textarea>`;
+      input = `<textarea name="${name}" ${recordEditable ? "" : "disabled"}>${escapeHtml(value)}</textarea>`;
     } else if (type === "readonly" || name === "nombre_completo") {
       input = `<input
         name="${name}"
@@ -1461,7 +2009,7 @@ function openRecord(recordId) {
         data-lpignore="true"
         data-1p-ignore="true"
         title="El nombre se obtiene automáticamente desde la base maestra."
-        ${canEditSelectedTerritory() ? "" : "disabled"}
+        ${recordEditable ? "" : "disabled"}
       >`;
     } else if (type === "cedula" || name === "cedula") {
       input = `<input
@@ -1471,10 +2019,10 @@ function openRecord(recordId) {
         maxlength="13"
         autocomplete="off"
         value="${escapeHtml(value)}"
-        ${canEditSelectedTerritory() ? "" : "disabled"}
+        ${recordEditable ? "" : "disabled"}
       >`;
     } else {
-      input = `<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${canEditSelectedTerritory() ? "" : "disabled"}>`;
+      input = `<input name="${name}" type="${type}" value="${escapeHtml(value)}" ${recordEditable ? "" : "disabled"}>`;
     }
 
     return `<label class="field ${full}"><span>${escapeHtml(label)}</span>${input}</label>`;
@@ -1490,11 +2038,12 @@ function openRecord(recordId) {
 
   bindRecordIdentityLookup();
 
-  els.saveRecord.hidden = !canEditSelectedTerritory();
+  els.saveRecord.hidden = !recordEditable;
   els.recordModal.showModal();
 
   if (
-    canEditSelectedTerritory() &&
+    recordEditable &&
+    record.subseccion_codigo !== "D1_DIPUTADOS_CIRCUNSCRIPCION" &&
     cedulaDigits(record.cedula).length === 11
   ) {
     resolveRecordNameByCedula({ silent: true });
@@ -1503,7 +2052,7 @@ function openRecord(recordId) {
 
 async function saveRecord(event) {
   event.preventDefault();
-  if (!state.selectedRecord || !canEditSelectedTerritory()) return;
+  if (!state.selectedRecord || !canEditRecord(state.selectedRecord)) return;
 
   hideLocalMessage(els.recordMessage);
   els.saveRecord.disabled = true;
@@ -1514,15 +2063,22 @@ async function saveRecord(event) {
 
   // El navegador no envía nombre_completo. El backend es la única autoridad
   // para fijar el nombre según la cédula.
-  for (const [name] of editableFieldsForSelectedStructure()) {
+  for (const [name] of editableFieldsForSelectedStructure(state.selectedRecord)) {
     if (name === "cedula" || name === "nombre_completo") continue;
     campos[name] = cleanText(formData.get(name));
   }
 
   try {
-    const updateRpc = state.selectedRecord.es_ficha_adicional === true
-      ? "sigep_portal_actualizar_ficha_adicional"
-      : (isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha");
+    let updateRpc;
+    if (isCircunscriptionStructure()) {
+      updateRpc = state.selectedRecord.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION"
+        ? "sigep_portal_actualizar_diputado_circunscripcion"
+        : "sigep_portal_actualizar_ficha_circunscripcion";
+    } else if (state.selectedRecord.es_ficha_adicional === true) {
+      updateRpc = "sigep_portal_actualizar_ficha_adicional";
+    } else {
+      updateRpc = isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha";
+    }
 
     const { data, error } = await supabase.rpc(
       updateRpc,
@@ -1585,23 +2141,28 @@ async function saveRecord(event) {
 function exportSummaryCsv() {
   const records = isProvincialStructure()
     ? provincialFilteredRecords()
-    : visibleStructureRecords();
+    : (isCircunscriptionStructure() ? circunscriptionFilteredRecords() : visibleStructureRecords());
   if (!state.selectedStructure || !records.length) {
     showMessage("Seleccione una estructura antes de exportar.");
     return;
   }
 
   const provincial = isProvincialStructure();
-  const rows = provincial
+  const circunscription = isCircunscriptionStructure();
+  const organized = provincial || circunscription;
+  const rows = organized
     ? [
-        ["SECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN", "COMENTARIO"],
+        ["SECCION", "SUBSECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN", "PERIODO", "ROL BLOQUE", "COMENTARIO"],
         ...records.map((record) => [
           `${record.seccion_letra}. ${record.seccion_titulo}`,
+          record.subseccion_etiqueta ? `${record.subseccion_etiqueta}. ${record.subseccion_titulo}` : "",
           record.orden_en_seccion || record.orden_cargo,
-          record.cargo,
+          circunscription ? circunscriptionDisplayCargo(record) : record.cargo,
           record.nombre_completo || "",
           formatCedulaDisplay(record.cedula || ""),
-          record.es_relacion_ex_oficio ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION EX OFICIO") : (record.es_ficha_adicional ? "FICHA ADICIONAL" : "FICHA PROVINCIAL"),
+          (record.es_relacion_ex_oficio || record.es_relacion_automatica) ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION AUTOMATICA") : (record.es_ficha_adicional ? "FICHA ADICIONAL" : (provincial ? "FICHA PROVINCIAL" : "FICHA DE CIRCUNSCRIPCION")),
+          record.periodo_electoral || "",
+          record.rol_bloque || "",
           record.comentario || ""
         ])
       ]
@@ -1643,12 +2204,11 @@ function populateCreateUserTerritories() {
   const territoryField = els.createUserForm.elements.territorio_codigo;
   const assignmentType = els.assignmentType?.value || "TERRITORIAL";
 
-  const availableTerritories =
-    assignmentType === "REGIONAL"
-      ? state.assignableTerritories.filter((item) =>
-          getRegionalMunicipalityCodes().has(item.codigo)
-        )
-      : state.assignableTerritories;
+  const availableTerritories = assignmentType === "REGIONAL"
+    ? state.assignableTerritories.filter((item) => getRegionalMunicipalityCodes().has(item.codigo))
+    : (assignmentType === "CIRCUNSCRIPCION"
+      ? state.assignableTerritories.filter((item) => String(item.tipo || "").trim().toUpperCase() === "CIRCUNSCRIPCION")
+      : state.assignableTerritories);
 
   territoryField.innerHTML =
     '<option value="">Seleccione un territorio</option>' +
@@ -1683,12 +2243,13 @@ function populateCreateUserRegions() {
 function updateCreateUserAssignmentFields() {
   const assignmentType = els.assignmentType?.value || "TERRITORIAL";
   const isRegional = assignmentType === "REGIONAL";
+  const isCircunscription = assignmentType === "CIRCUNSCRIPCION";
 
   els.regionField.hidden = !isRegional;
   els.regionSelect.required = isRegional;
   els.territoryFieldLabel.textContent = isRegional
     ? "Municipio inicial"
-    : "Territorio inicial";
+    : (isCircunscription ? "Circunscripción" : "Territorio inicial");
 
   populateCreateUserTerritories();
   populateCreateUserRegions();
@@ -1939,7 +2500,7 @@ async function createUser(event) {
         formData.get("nombre_completo") || ""
       ).trim(),
       contrasena: String(formData.get("contrasena") || ""),
-      tipo_asignacion: assignmentType
+      tipo_asignacion: assignmentType === "CIRCUNSCRIPCION" ? "TERRITORIAL" : assignmentType
     };
 
     if (assignmentType === "REGIONAL") {
@@ -1964,10 +2525,10 @@ async function createUser(event) {
       payload
     );
 
-    const assignmentMessage =
-      result.tipo_asignacion === "REGIONAL"
-        ? ` como regional de la Región ${result.asignacion?.region || ""}`
-        : "";
+    const selectedTerritoryName = state.assignableTerritories.find((item) => item.codigo === territoryCode)?.nombre || territoryCode;
+    const assignmentMessage = assignmentType === "REGIONAL"
+      ? ` como regional de la Región ${result.asignacion?.region || ""}`
+      : (assignmentType === "CIRCUNSCRIPCION" ? ` para ${selectedTerritoryName}` : "");
 
     showLocalMessage(
       els.createUserMessage,
@@ -2390,6 +2951,130 @@ function executeProvincialPrint() {
   window.setTimeout(() => window.print(), 120);
 }
 
+function updateCircunscriptionPrintCount() {
+  if (!els.circunscriptionPrintSections || !els.circunscriptionPrintCount) return;
+  const sections = selectedCheckboxValues(els.circunscriptionPrintSections);
+  const conformation = els.circunscriptionPrintConformation.value;
+  const count = state.records
+    .filter((record) => sections.has(record.seccion_codigo))
+    .filter((record) => matchesCircunscriptionConformation(record, conformation))
+    .length;
+  els.circunscriptionPrintCount.textContent = `${count} elemento${count === 1 ? "" : "s"} seleccionado${count === 1 ? "" : "s"}.`;
+  els.confirmCircunscriptionPrint.disabled = count === 0 && conformation !== "REGIDORES_VOCALES";
+}
+
+function openCircunscriptionPrintOptions() {
+  for (const input of els.circunscriptionPrintSections.querySelectorAll('input[type="checkbox"]')) {
+    input.checked = state.circunscriptionFilters.sections.has(input.value);
+  }
+  els.circunscriptionPrintConformation.value = state.circunscriptionFilters.conformation;
+  els.circunscriptionPrintIdentify.checked = true;
+  updateCircunscriptionPrintCount();
+  els.circunscriptionPrintModal.showModal();
+}
+
+function executeCircunscriptionPrint() {
+  const sections = selectedCheckboxValues(els.circunscriptionPrintSections);
+  if (!sections.size) { showMessage("Seleccione al menos una sección para imprimir."); return; }
+  state.circunscriptionPrint = {
+    active: true,
+    sections,
+    conformation: els.circunscriptionPrintConformation.value,
+    identifySections: els.circunscriptionPrintIdentify.checked
+  };
+  renderSummary();
+  els.circunscriptionPrintModal.close();
+  window.setTimeout(() => window.print(), 120);
+}
+
+function circunscriptionNumber() {
+  const digits = String(state.selectedStructure?.circunscripcion || "").replace(/\D/g, "");
+  return digits ? Number(digits) : null;
+}
+
+function renderCircunscriptionDeputyAdmin() {
+  if (!els.circunscriptionDeputyAdmin || !els.circunscriptionDeputySlots) return;
+  const visible = state.isAdmin && isCircunscriptionStructure();
+  els.circunscriptionDeputyAdmin.hidden = !visible;
+  if (!visible) return;
+
+  const number = circunscriptionNumber();
+  const capacity = CIRCUNSCRIPTION_DEPUTY_CAPACITY.get(number) || 0;
+  const activeByOrder = new Map(
+    state.records
+      .filter((record) => record.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION")
+      .map((record) => [Number(record.orden_en_seccion || record.orden_cargo), record])
+  );
+
+  els.circunscriptionDeputySlots.innerHTML = Array.from({ length: capacity }, (_, index) => {
+    const order = index + 1;
+    const record = activeByOrder.get(order);
+    const active = Boolean(record);
+    const occupied = Boolean(record?.nombre_completo || record?.cedula);
+    return `<button class="button ${active ? "secondary" : "ghost"} small" type="button" data-circ-deputy-order="${order}" data-circ-deputy-enable="${active ? "false" : "true"}" ${occupied ? "disabled" : ""}>Cupo ${order} · ${active ? (occupied ? "Ocupado" : "Retirar") : "Habilitar"}</button>`;
+  }).join("");
+}
+
+async function toggleCircunscriptionDeputySlot(order, enable) {
+  if (!state.isAdmin || !isCircunscriptionStructure()) return;
+  const { data, error } = await supabase.rpc("sigep_admin_habilitar_diputado_circunscripcion", {
+    p_estructura_codigo: state.selectedStructure.estructura_codigo,
+    p_orden: Number(order),
+    p_habilitar: Boolean(enable)
+  });
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.ok) throw new Error(result?.mensaje || "No se pudo actualizar el cupo de diputado.");
+  showMessage(result.mensaje || "Cupo de diputado actualizado.", "success");
+  await selectStructure(state.selectedStructure.estructura_codigo);
+}
+
+function bindCircunscriptionInterface() {
+  els.circunscriptionSectionFilters?.addEventListener("change", () => {
+    state.circunscriptionFilters.sections = selectedCheckboxValues(els.circunscriptionSectionFilters);
+    renderRecordCards(); renderSummary(); updateMetrics();
+  });
+  els.circunscriptionConformationFilter?.addEventListener("change", () => {
+    state.circunscriptionFilters.conformation = els.circunscriptionConformationFilter.value;
+    for (const input of els.circunscriptionSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+    state.circunscriptionFilters.sections = new Set(CIRCUNSCRIPTION_SECTIONS.map((section) => section.code));
+    renderRecordCards(); renderSummary(); updateMetrics();
+  });
+  els.circunscriptionSelectAll?.addEventListener("click", () => {
+    for (const input of els.circunscriptionSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = true;
+    state.circunscriptionFilters.sections = new Set(CIRCUNSCRIPTION_SECTIONS.map((section) => section.code));
+    state.circunscriptionFilters.conformation = "ESTRUCTURA_COMPLETA";
+    els.circunscriptionConformationFilter.value = "ESTRUCTURA_COMPLETA";
+    renderRecordCards(); renderSummary(); updateMetrics();
+  });
+  els.circunscriptionSelectNone?.addEventListener("click", () => {
+    for (const input of els.circunscriptionSectionFilters.querySelectorAll('input[type="checkbox"]')) input.checked = false;
+    state.circunscriptionFilters.sections = new Set();
+    state.circunscriptionFilters.conformation = "ESTRUCTURA_COMPLETA";
+    els.circunscriptionConformationFilter.value = "ESTRUCTURA_COMPLETA";
+    renderRecordCards(); renderSummary(); updateMetrics();
+  });
+  els.circunscriptionPrintSections?.addEventListener("change", updateCircunscriptionPrintCount);
+  els.circunscriptionPrintConformation?.addEventListener("change", updateCircunscriptionPrintCount);
+  els.circPrintSelectAll?.addEventListener("click", () => { for (const input of els.circunscriptionPrintSections.querySelectorAll('input[type="checkbox"]')) input.checked = true; updateCircunscriptionPrintCount(); });
+  els.circPrintSelectNone?.addEventListener("click", () => { for (const input of els.circunscriptionPrintSections.querySelectorAll('input[type="checkbox"]')) input.checked = false; updateCircunscriptionPrintCount(); });
+  els.confirmCircunscriptionPrint?.addEventListener("click", executeCircunscriptionPrint);
+  els.closeCircunscriptionPrint?.addEventListener("click", () => els.circunscriptionPrintModal.close());
+  els.cancelCircunscriptionPrint?.addEventListener("click", () => els.circunscriptionPrintModal.close());
+  els.circunscriptionDeputySlots?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-circ-deputy-order]");
+    if (!button) return;
+    button.disabled = true;
+    try { await toggleCircunscriptionDeputySlot(button.dataset.circDeputyOrder, button.dataset.circDeputyEnable === "true"); }
+    catch (error) { showMessage(error.message || "No se pudo actualizar el cupo de diputado."); renderCircunscriptionDeputyAdmin(); }
+  });
+  window.addEventListener("afterprint", () => {
+    if (!state.circunscriptionPrint.active) return;
+    state.circunscriptionPrint.active = false;
+    renderSummary();
+  });
+}
+
 function bindProvincialInterface() {
   els.provincialSectionFilters?.addEventListener("change", () => {
     state.provincialFilters.sections = selectedCheckboxValues(els.provincialSectionFilters);
@@ -2440,6 +3125,7 @@ function bindProvincialInterface() {
 }
 
 bindProvincialInterface();
+bindCircunscriptionInterface();
 
 els.approvalsTab.addEventListener("click", () => {
   if (!state.isAdmin || els.approvalsTab.hidden) return;
@@ -2508,6 +3194,8 @@ els.cancelRecord.addEventListener("click", () => els.recordModal.close());
 els.printSummary.addEventListener("click", () => {
   if (isProvincialStructure()) {
     openProvincialPrintOptions();
+  } else if (isCircunscriptionStructure()) {
+    openCircunscriptionPrintOptions();
   } else {
     window.print();
   }
