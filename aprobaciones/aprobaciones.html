@@ -6,16 +6,16 @@
   <meta name="theme-color" content="#082f6b">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'">
   <title>Aprobaciones | SIGEP PRM San Cristóbal</title>
-  <link rel="stylesheet" href="admin-styles.css?v=AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1">
+  <link rel="stylesheet" href="admin-styles.css?v=APROBACIONES_DASHBOARD_TERRITORIAL_V1_6">
   <script src="config.js" defer></script>
-  <script type="module" src="aprobaciones.js?v=AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1"></script>
+  <script type="module" src="aprobaciones.js?v=APROBACIONES_DASHBOARD_TERRITORIAL_V1_6"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <p class="kicker">SIGEP · PRM SAN CRISTÓBAL</p>
       <h1>Aprobaciones territoriales</h1>
-      <p class="topbar-subtitle">Nuevo cargo, actualización de datos y corrección de ficha según el alcance autorizado</p>
+      <p class="topbar-subtitle">Gestión organizada por cola, territorio y subterritorio autorizado</p>
     </div>
     <div class="topbar-actions">
       <a class="secondary button-link" href="../portal.html">Volver al portal territorial</a>
@@ -28,9 +28,14 @@
   <main class="admin-shell">
     <div id="admin-message" class="message" role="status" aria-live="polite" hidden></div>
 
+    <details id="technical-panel" class="technical-panel" hidden>
+      <summary>Diagnóstico técnico</summary>
+      <pre id="technical-content"></pre>
+    </details>
+
     <section id="login-panel" class="panel login-panel" hidden>
       <h2>Acceso autorizado</h2>
-      <p>Use una cuenta activa con capacidad de aprobar solicitudes en uno o varios territorios.</p>
+      <p>Use una cuenta activa con capacidad de aprobar solicitudes.</p>
       <form id="login-form">
         <label for="email">Correo electrónico</label>
         <input id="email" type="email" autocomplete="username" required>
@@ -42,77 +47,135 @@
       </form>
     </section>
 
-    <section id="dashboard" hidden>
-      <section id="scope-summary" class="scope-summary-grid" aria-label="Alcances de aprobación"></section>
-
-      <section class="metrics" aria-label="Métricas por estado">
-        <article><span>Pendientes</span><strong id="metric-pending">0</strong></article>
-        <article><span>En revisión</span><strong id="metric-review">0</strong></article>
-        <article><span>Aprobadas</span><strong id="metric-approved">0</strong></article>
-        <article><span>Rechazadas</span><strong id="metric-rejected">0</strong></article>
-        <article><span>Cerradas</span><strong id="metric-closed">0</strong></article>
-      </section>
-
-      <section class="type-metrics" aria-label="Métricas por tipo de solicitud">
-        <article class="type-metric type-new">
-          <span>Solicitudes de cargo</span>
-          <strong id="metric-type-new">0</strong>
-        </article>
-        <article class="type-metric type-update">
-          <span>Actualizaciones de datos</span>
-          <strong id="metric-type-update">0</strong>
-        </article>
-        <article class="type-metric type-correction">
-          <span>Correcciones de ficha</span>
-          <strong id="metric-type-correction">0</strong>
-        </article>
-      </section>
-
-      <section class="panel filters-panel">
-        <div class="panel-heading">
+    <section id="app-shell" hidden>
+      <section id="dashboard-home">
+        <section class="dashboard-hero panel">
           <div>
-            <p class="kicker">Búsqueda por alcance autorizado</p>
-            <h2>Filtros</h2>
+            <p class="kicker">Centro de trabajo</p>
+            <h2>Seleccione una cola o un territorio</h2>
+            <p class="panel-help">Las solicitudes se presentan únicamente dentro de los alcances autorizados para su cuenta.</p>
           </div>
-          <button id="clear-filters" class="secondary" type="button">Limpiar</button>
-        </div>
+          <button id="open-all-requests" class="primary" type="button">Ver todas las solicitudes</button>
+        </section>
 
-        <div class="filters-grid">
-          <label>Nombre o cédula
-            <input id="filter-text" type="search" placeholder="Nombre o cédula enmascarada">
-          </label>
-          <label>Tipo
-            <select id="filter-type"><option value="">Todos</option></select>
-          </label>
-          <label>Estado
-            <select id="filter-state"><option value="">Todos</option></select>
-          </label>
-          <label>Nivel
-            <select id="filter-level"><option value="">Todos</option></select>
-          </label>
-          <label>Territorio
-            <input id="filter-territory" type="search" placeholder="Provincia, circunscripción, municipio, región o zona">
-          </label>
-          <label>Cargo
-            <input id="filter-cargo" type="search" placeholder="Nombre del cargo">
-          </label>
-          <label>Desde
-            <input id="filter-date" type="date">
-          </label>
-        </div>
+        <section class="dashboard-section" aria-labelledby="states-title">
+          <div class="dashboard-heading">
+            <div>
+              <p class="kicker">Flujo de trabajo</p>
+              <h2 id="states-title">Colas por estado</h2>
+            </div>
+            <span id="dashboard-total" class="count-chip">0 solicitudes</span>
+          </div>
+          <div id="state-dashboard" class="state-dashboard-grid"></div>
+        </section>
+
+        <section class="dashboard-section" aria-labelledby="scopes-title">
+          <div class="dashboard-heading">
+            <div>
+              <p class="kicker">Organización territorial</p>
+              <h2 id="scopes-title">Territorios y subterritorios</h2>
+              <p class="panel-help">Seleccione el lugar donde desea revisar la cola de trabajo.</p>
+            </div>
+          </div>
+          <div id="scope-dashboard" class="scope-dashboard-grid"></div>
+        </section>
+
+        <section class="dashboard-section" aria-labelledby="types-title">
+          <div class="dashboard-heading">
+            <div>
+              <p class="kicker">Clase de solicitud</p>
+              <h2 id="types-title">Accesos rápidos por tipo</h2>
+            </div>
+          </div>
+          <div id="type-dashboard" class="type-dashboard-grid"></div>
+        </section>
       </section>
 
-      <section class="panel">
-        <div class="panel-heading">
+      <section id="queue-view" hidden>
+        <nav class="breadcrumb" aria-label="Ruta de navegación">
+          <button id="back-dashboard" class="secondary" type="button">← Volver al dashboard</button>
+          <span id="queue-breadcrumb">Solicitudes</span>
+        </nav>
+
+        <section class="panel queue-header">
           <div>
-            <p class="kicker">Cola de trabajo autorizada</p>
-            <h2>Solicitudes</h2>
-            <p class="panel-help">El backend devuelve únicamente las solicitudes pertenecientes a los alcances donde la cuenta puede aprobar.</p>
+            <p class="kicker">Cola de trabajo</p>
+            <h2 id="queue-title">Solicitudes</h2>
+            <p id="queue-context" class="panel-help"></p>
           </div>
           <span id="results-count" class="count-chip">0 resultados</span>
-        </div>
+        </section>
 
-        <div id="requests-list" class="requests-list"></div>
+        <section class="panel filters-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="kicker">Localización</p>
+              <h2>Filtros</h2>
+            </div>
+            <div class="filter-actions">
+              <button id="apply-filters" class="primary" type="button">Aplicar filtros</button>
+              <button id="clear-filters" class="secondary" type="button">Limpiar</button>
+            </div>
+          </div>
+
+          <div class="filters-grid">
+            <label>Nombre, cédula o número de solicitud
+              <input id="filter-text" type="search" placeholder="Buscar">
+            </label>
+            <label>Tipo
+              <select id="filter-type">
+                <option value="">Todos</option>
+                <option value="NUEVO_CARGO">Solicitud de cargo</option>
+                <option value="ACTUALIZACION_DATOS">Actualización de datos</option>
+                <option value="CORRECCION_FICHA">Corrección de ficha</option>
+              </select>
+            </label>
+            <label>Estado
+              <select id="filter-state"></select>
+            </label>
+            <label>Nivel
+              <select id="filter-level">
+                <option value="">Todos</option>
+                <option value="PROVINCIA">Provincia</option>
+                <option value="CIRCUNSCRIPCION">Circunscripción</option>
+                <option value="MUNICIPIO">Municipio</option>
+                <option value="DISTRITO_MUNICIPAL">Distrito municipal</option>
+                <option value="REGION">Región</option>
+                <option value="ZONA">Zona</option>
+              </select>
+            </label>
+            <label>Territorio o subterritorio
+              <select id="filter-scope"></select>
+            </label>
+            <label>Cargo
+              <input id="filter-cargo" type="search" placeholder="Nombre del cargo">
+            </label>
+            <label>Desde
+              <input id="filter-date-from" type="date">
+            </label>
+            <label>Hasta
+              <input id="filter-date-to" type="date">
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="kicker">Resultados autorizados</p>
+              <h2>Solicitudes</h2>
+              <p class="panel-help">Seleccione una solicitud para revisar su detalle y ejecutar la acción correspondiente.</p>
+            </div>
+          </div>
+
+          <div id="requests-list" class="requests-list"></div>
+
+          <nav id="pagination" class="pagination" aria-label="Paginación">
+            <button id="previous-page" class="secondary" type="button">Anterior</button>
+            <span id="page-indicator">Página 1</span>
+            <button id="next-page" class="secondary" type="button">Siguiente</button>
+          </nav>
+        </section>
       </section>
     </section>
   </main>
@@ -136,7 +199,7 @@
 
   <dialog id="action-dialog">
     <form method="dialog" id="action-form">
-      <h2 id="dialog-title">Acción territorial</h2>
+      <h2 id="dialog-title">Confirmar acción</h2>
       <p id="dialog-description"></p>
       <div id="dialog-warning" class="request-note" hidden></div>
 
