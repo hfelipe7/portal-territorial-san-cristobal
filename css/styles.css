@@ -961,3 +961,174 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
   .summary-table tr { break-inside: avoid; }
   .summary-detail { font-size: 8pt; }
 }
+
+
+/* ==========================================================================
+   SIGEP · Usuarios, autorizaciones y aprobaciones v1.5
+   ========================================================================== */
+#territory-coverage {
+  display:block;
+}
+
+.authorization-summary-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin-bottom:18px;
+}
+
+.authorization-summary-card {
+  border:1px solid #d7e4ef;
+  border-radius:14px;
+  padding:16px;
+  background:#f7fbff;
+}
+
+.authorization-summary-card span {
+  display:block;
+  color:#5f6f7f;
+  font-size:.8rem;
+  font-weight:700;
+}
+
+.authorization-summary-card strong {
+  display:block;
+  margin-top:4px;
+  color:#0b4f8a;
+  font-size:1.65rem;
+}
+
+.authorization-summary-card.warning {
+  border-color:#f2c3c8;
+  background:#fff7f8;
+}
+
+.authorization-summary-card.warning strong,
+.authorization-summary-card.danger strong {
+  color:#b42335;
+}
+
+.authorization-summary-card.danger {
+  border-color:#e8a8b0;
+  background:#fff0f2;
+}
+
+.authorization-coverage-section {
+  margin-bottom:20px;
+}
+
+.authorization-section-title {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:10px;
+}
+
+.authorization-section-title h3,
+.authorization-section-title p {
+  margin:0;
+}
+
+.authorization-section-title p {
+  color:#667484;
+  font-size:.82rem;
+}
+
+.coverage-user-list {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  margin-top:8px;
+}
+
+.authorization-principal {
+  border:1px solid #9cc7ea;
+  background:#edf7ff;
+  color:#084f88;
+}
+
+.authorization-additional {
+  border:1px solid #df6674;
+  background:#fff0f2;
+  color:#a21527;
+  font-weight:750;
+}
+
+.authorization-missing {
+  border:1px solid #d39a00;
+  background:#fff7df;
+  color:#785000;
+}
+
+.authorization-alert-text {
+  display:block;
+  margin-top:4px;
+  color:#b42335;
+  font-weight:800;
+}
+
+.approval-capability {
+  display:block;
+  margin-top:5px;
+  color:#0b6e47;
+  font-size:.74rem;
+  font-weight:800;
+}
+
+.user-has-additional td:first-child {
+  box-shadow:inset 4px 0 0 #c62032;
+}
+
+#permissions-modal {
+  width:min(1040px,calc(100% - 28px));
+}
+
+#permissions-modal .permissions-table {
+  min-width:820px;
+}
+
+.permission-section-row td {
+  background:#eaf3fb;
+  color:#0b4f8a;
+  padding-top:13px;
+  padding-bottom:13px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  font-size:.78rem;
+}
+
+.permission-row.is-additional td {
+  background:#fff7f8;
+}
+
+.permission-row.is-additional td:first-child {
+  box-shadow:inset 4px 0 0 #c62032;
+}
+
+.permission-row input[type="checkbox"],
+.permission-row input[type="radio"] {
+  width:18px;
+  height:18px;
+}
+
+.permission-row td:not(:first-child) {
+  text-align:center;
+}
+
+@media (max-width:900px) {
+  .authorization-summary-grid {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .authorization-section-title {
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
+
+@media (max-width:600px) {
+  .authorization-summary-grid {
+    grid-template-columns:1fr;
+  }
+}
