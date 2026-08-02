@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#082f6b">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'">
   <title>Aprobaciones | SIGEP PRM San Cristóbal</title>
-  <link rel="stylesheet" href="admin-styles.css?v=AUTORIZACIONES_TERRITORIALES_V1_5">
+  <link rel="stylesheet" href="admin-styles.css?v=AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1">
   <script src="config.js" defer></script>
-  <script type="module" src="aprobaciones.js?v=AUTORIZACIONES_TERRITORIALES_V1_5"></script>
+  <script type="module" src="aprobaciones.js?v=AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1"></script>
 </head>
 <body>
   <header class="topbar">
@@ -28,7 +28,7 @@
   <main class="admin-shell">
     <div id="admin-message" class="message" role="status" aria-live="polite" hidden></div>
 
-    <section id="login-panel" class="panel login-panel">
+    <section id="login-panel" class="panel login-panel" hidden>
       <h2>Acceso autorizado</h2>
       <p>Use una cuenta activa con capacidad de aprobar solicitudes en uno o varios territorios.</p>
       <form id="login-form">

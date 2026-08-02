@@ -1,7 +1,7 @@
-// SIGEP PRM SC — APROBACIONES BUILD: AUTORIZACIONES_TERRITORIALES_V1_5
+// SIGEP PRM SC — APROBACIONES BUILD: AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-window.__SIGEP_APROBACIONES_BUILD__ = "AUTORIZACIONES_TERRITORIALES_V1_5";
+window.__SIGEP_APROBACIONES_BUILD__ = "AUTORIZACIONES_TERRITORIALES_SSO_V1_5_1";
 
 const config = window.SIGEP_ADMIN_CONFIG || {};
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -185,9 +185,16 @@ function renderScopeSummary() {
 }
 
 async function verifyAccess() {
-  const { data: sessionData } = await supabase.auth.getSession();
+  const { data: sessionData, error: sessionError } =
+    await supabase.auth.getSession();
+
+  if (sessionError) {
+    showMessage(`No fue posible recuperar la sesión: ${sessionError.message}`, "error");
+    return "ERROR";
+  }
+
   const session = sessionData.session;
-  if (!session) return false;
+  if (!session) return "NO_SESSION";
 
   const { data, error } = await supabase.rpc(
     "sigep_aprobaciones_contexto_actual"
@@ -195,7 +202,7 @@ async function verifyAccess() {
 
   if (error) {
     showMessage(`No fue posible verificar el acceso: ${error.message}`, "error");
-    return false;
+    return "ERROR";
   }
 
   const payload = normalizePayload(data);
@@ -206,10 +213,15 @@ async function verifyAccess() {
   ) {
     showMessage(
       payload?.mensaje ||
-      "La cuenta no tiene autorización activa para gestionar aprobaciones.",
+      "La cuenta inició sesión correctamente, pero no tiene autorización activa para gestionar aprobaciones.",
       "error"
     );
-    return false;
+    $("#session-user").textContent =
+      payload?.perfil?.nombre_completo ||
+      payload?.perfil?.usuario_login ||
+      session.user.email ||
+      "Usuario sin alcance de aprobación";
+    return "NO_PERMISSION";
   }
 
   approvalContext = payload;
@@ -220,7 +232,7 @@ async function verifyAccess() {
     "Usuario autorizado";
 
   renderScopeSummary();
-  return true;
+  return "AUTHORIZED";
 }
 
 async function refreshRequests() {
@@ -802,9 +814,21 @@ async function executeAction() {
 }
 
 async function enterDashboard() {
-  if (!(await verifyAccess())) {
+  const accessStatus = await verifyAccess();
+
+  if (accessStatus === "NO_SESSION") {
     $("#login-panel").hidden = false;
     $("#dashboard").hidden = true;
+    $("#refresh-button").hidden = true;
+    $("#logout-button").hidden = true;
+    return;
+  }
+
+  if (accessStatus !== "AUTHORIZED") {
+    $("#login-panel").hidden = true;
+    $("#dashboard").hidden = true;
+    $("#refresh-button").hidden = true;
+    $("#logout-button").hidden = false;
     return;
   }
 
@@ -825,13 +849,23 @@ async function initialize() {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: true,
+      storageKey: "portal-territorial-sc-auth"
     }
   });
 
-  const { data } = await supabase.auth.getSession();
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    showMessage(`No fue posible recuperar la sesión: ${error.message}`, "error");
+    $("#login-panel").hidden = false;
+    return;
+  }
+
   if (data.session) {
     await enterDashboard();
+  } else {
+    $("#login-panel").hidden = false;
+    $("#dashboard").hidden = true;
   }
 }
 
