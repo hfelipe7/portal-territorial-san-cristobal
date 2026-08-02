@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: PROVINCIA_Y_CIRCUNSCRIPCIONES_RPC_V1_4
+// SIGEP PRM SC — PORTAL BUILD: USUARIOS_AUTORIZACIONES_APROBACIONES_V1_5
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "PROVINCIA_Y_CIRCUNSCRIPCIONES_RPC_V1_4";
+window.__SIGEP_PORTAL_BUILD__ = "USUARIOS_AUTORIZACIONES_APROBACIONES_V1_5";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -159,10 +159,13 @@ const state = {
   users: [],
   allAssignments: [],
   allRegionalAssignments: [],
+  allPrincipals: [],
   assignableTerritories: [],
   regionalStructures: [],
   regionalAssignments: [],
-  selectedPermissionType: "TERRITORIAL",
+  approvalContext: null,
+  canApprove: false,
+  selectedPermissionType: "ACUMULATIVO",
   selectedUserId: null,
   passwordUserId: null,
   auditRows: [],
@@ -485,8 +488,117 @@ function installCircunscriptionInterface() {
   }
 }
 
+
+function installAuthorizationInterface() {
+  if (els.usersTab) {
+    els.usersTab.textContent = "Usuarios, autorizaciones y aprobaciones";
+  }
+
+  const usersPanelTitle = document.querySelector("#users-panel .section-title h2");
+  const usersPanelDescription = document.querySelector("#users-panel .section-title .muted");
+  if (usersPanelTitle) usersPanelTitle.textContent = "Usuarios, autorizaciones y aprobaciones";
+  if (usersPanelDescription) {
+    usersPanelDescription.textContent =
+      "Administre el alcance principal, las autorizaciones adicionales y la capacidad de aprobar solicitudes por territorio o región.";
+  }
+
+  const createCardTitle = document.querySelector("#create-user-form")?.closest(".form-card")?.querySelector("h3");
+  if (createCardTitle) createCardTitle.textContent = "Crear usuario y alcance principal";
+
+  const checkRow = document.querySelector("#create-user-form .check-row");
+  if (checkRow && !checkRow.querySelector('input[name="puede_aprobar"]')) {
+    checkRow.insertAdjacentHTML(
+      "beforeend",
+      '<label><input name="puede_aprobar" type="checkbox"> Puede aprobar solicitudes</label>'
+    );
+  }
+
+  if (els.permissionsDescription) {
+    els.permissionsDescription.textContent =
+      "Seleccione el alcance principal y configure VER, EDITAR y APROBAR para cada autorización. Las adicionales se mostrarán en rojo.";
+  }
+
+  if (els.savePermissions) {
+    els.savePermissions.textContent = "Guardar autorizaciones";
+  }
+
+  const permissionHead = document.querySelector("#permissions-modal .permissions-table thead tr");
+  if (permissionHead) {
+    permissionHead.innerHTML = `
+      <th>Territorio o región</th>
+      <th>Principal</th>
+      <th>Ver</th>
+      <th>Editar</th>
+      <th>Aprobar</th>
+    `;
+  }
+}
+
+function normalizeRpcPayload(value) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function authorizationKey(type, territoryCode, region = "") {
+  return `${String(type || "").toUpperCase()}|${territoryCode || ""}|${region || ""}`;
+}
+
+function principalForUser(userId) {
+  return state.allPrincipals.find(
+    (item) => item.usuario_id === userId && item.activo !== false
+  ) || null;
+}
+
+function userAuthorizationRows(userId) {
+  const territorial = state.allAssignments
+    .filter((item) => item.usuario_id === userId && item.activo !== false && item.puede_ver)
+    .map((item) => ({
+      tipo_alcance: "TERRITORIO",
+      territorio_codigo: item.territorio_codigo,
+      region: null,
+      puede_ver: item.puede_ver === true,
+      puede_editar: item.puede_editar === true,
+      puede_aprobar: item.puede_aprobar === true
+    }));
+
+  const regional = state.allRegionalAssignments
+    .filter((item) => item.usuario_id === userId && item.activo !== false && item.puede_ver)
+    .map((item) => ({
+      tipo_alcance: "REGION",
+      territorio_codigo: item.territorio_codigo,
+      region: item.region,
+      puede_ver: item.puede_ver === true,
+      puede_editar: item.puede_editar === true,
+      puede_aprobar: item.puede_aprobar === true
+    }));
+
+  return [...territorial, ...regional];
+}
+
+function capabilityLabel(item) {
+  const labels = ["ver"];
+  if (item.puede_editar) labels.push("editar");
+  if (item.puede_aprobar) labels.push("aprobar");
+  return labels.join(" · ");
+}
+
+function scopeDisplayName(scope, territoryByCode) {
+  const territory =
+    territoryByCode.get(scope.territorio_codigo)?.nombre ||
+    scope.territorio_codigo;
+
+  return scope.tipo_alcance === "REGION"
+    ? `${territory} · Región ${scope.region}`
+    : territory;
+}
+
 installProvincialInterface();
 installCircunscriptionInterface();
+installAuthorizationInterface();
 els.appName.textContent = appName;
 
 function showMessage(text, type = "error", duration = 5200) {
@@ -1116,11 +1228,29 @@ async function requireSession() {
 
   state.profile = profile;
   state.isAdmin = profile.rol === "ADMINISTRADOR";
+
+  const { data: approvalContextData, error: approvalContextError } =
+    await supabase.rpc("sigep_aprobaciones_contexto_actual");
+
+  const approvalContext = approvalContextError
+    ? null
+    : normalizeRpcPayload(approvalContextData);
+
+  state.approvalContext = approvalContext;
+  state.canApprove =
+    state.isAdmin ||
+    approvalContext?.puede_aprobar_alguno === true;
+
   els.userName.textContent = profile.nombre_completo || profile.usuario_login;
-  els.userRole.textContent = state.isAdmin ? "Administrador provincial" : `Usuario territorial · ${profile.usuario_login}`;
+  els.userRole.textContent = state.isAdmin
+    ? "Administrador provincial"
+    : state.canApprove
+      ? `Usuario territorial · aprobador · ${profile.usuario_login}`
+      : `Usuario territorial · ${profile.usuario_login}`;
+
   els.usersTab.hidden = !state.isAdmin;
   els.auditTab.hidden = !state.isAdmin;
-  els.approvalsTab.hidden = !state.isAdmin;
+  els.approvalsTab.hidden = !state.canApprove;
   return true;
 }
 
@@ -1138,12 +1268,12 @@ async function loadTerritories() {
     await Promise.all([
       supabase
         .from("usuario_territorios")
-        .select("usuario_id,territorio_codigo,puede_ver,puede_editar,activo")
+        .select("usuario_id,territorio_codigo,puede_ver,puede_editar,puede_aprobar,activo")
         .eq("usuario_id", state.user.id)
         .eq("activo", true),
       supabase
         .from("usuario_regiones")
-        .select("usuario_id,territorio_codigo,region,puede_ver,puede_editar,activo")
+        .select("usuario_id,territorio_codigo,region,puede_ver,puede_editar,puede_aprobar,activo")
         .eq("usuario_id", state.user.id)
         .eq("activo", true)
     ]);
@@ -2265,66 +2395,31 @@ function getUserAssignmentType(userId) {
 
 async function loadAdminData() {
   if (!state.isAdmin) return;
+
   els.usersBody.innerHTML =
-    '<tr><td colspan="5" class="loading">Cargando usuarios…</td></tr>';
+    '<tr><td colspan="5" class="loading">Cargando usuarios y autorizaciones…</td></tr>';
 
-  const [
-    territoriesResult,
-    usersResult,
-    assignmentsResult,
-    regionalAssignmentsResult,
-    regionalStructuresResult
-  ] = await Promise.all([
-    supabase
-      .from("territorios")
-      .select("codigo,nombre,tipo,orden")
-      .eq("asignable", true)
-      .eq("activo", true)
-      .order("orden"),
-    supabase
-      .from("perfiles")
-      .select(
-        "id,usuario_login,nombre_completo,rol,activo,debe_cambiar_contrasena,ultimo_acceso,creado_en"
-      )
-      .order("creado_en"),
-    supabase
-      .from("usuario_territorios")
-      .select(
-        "id,usuario_id,territorio_codigo,puede_ver,puede_editar,activo"
-      )
-      .eq("activo", true),
-    supabase
-      .from("usuario_regiones")
-      .select(
-        "id,usuario_id,territorio_codigo,region,puede_ver,puede_editar,activo"
-      )
-      .eq("activo", true),
-    supabase
-      .from("estructuras")
-      .select(
-        "estructura_codigo,territorio_codigo,estructura_nombre,municipio,region,orden_en_territorio,activo"
-      )
-      .eq("nivel_estructura", "REGION")
-      .eq("activo", true)
-      .order("territorio_codigo")
-      .order("region")
-  ]);
+  const { data, error } = await supabase.rpc(
+    "sigep_admin_listar_autorizaciones_usuarios"
+  );
 
-  if (territoriesResult.error) throw territoriesResult.error;
-  if (usersResult.error) throw usersResult.error;
-  if (assignmentsResult.error) throw assignmentsResult.error;
-  if (regionalAssignmentsResult.error) {
-    throw regionalAssignmentsResult.error;
-  }
-  if (regionalStructuresResult.error) {
-    throw regionalStructuresResult.error;
+  if (error) throw error;
+
+  const payload = normalizeRpcPayload(data);
+  if (!payload || payload.ok !== true) {
+    throw new Error(
+      payload?.mensaje ||
+      payload?.codigo_resultado ||
+      "No fue posible cargar las autorizaciones."
+    );
   }
 
-  state.assignableTerritories = territoriesResult.data || [];
-  state.users = usersResult.data || [];
-  state.allAssignments = assignmentsResult.data || [];
-  state.allRegionalAssignments = regionalAssignmentsResult.data || [];
-  state.regionalStructures = regionalStructuresResult.data || [];
+  state.assignableTerritories = payload.territorios || [];
+  state.users = payload.usuarios || [];
+  state.allAssignments = payload.asignaciones_territoriales || [];
+  state.allRegionalAssignments = payload.asignaciones_regionales || [];
+  state.regionalStructures = payload.regiones || [];
+  state.allPrincipals = payload.alcances_principales || [];
 
   updateCreateUserAssignmentFields();
   renderCoverage();
@@ -2332,23 +2427,106 @@ async function loadAdminData() {
 }
 
 function renderCoverage() {
-  const userById = new Map(state.users.map((user) => [user.id, user]));
-  els.territoryCoverage.innerHTML = state.assignableTerritories.map((territory) => {
-    const count = new Set(
-      state.allAssignments
-        .filter((assignment) => assignment.territorio_codigo === territory.codigo && assignment.puede_ver && userById.get(assignment.usuario_id)?.activo && userById.get(assignment.usuario_id)?.rol === "USUARIO")
-        .map((assignment) => assignment.usuario_id)
-    ).size;
-    const complete = count >= 2;
-    const width = Math.min(100, (count / 2) * 100);
+  const ordinaryUsers = state.users.filter((user) => user.rol === "USUARIO");
+  const activeUsers = ordinaryUsers.filter((user) => user.activo);
+  const withAdditional = ordinaryUsers.filter((user) => {
+    const principal = principalForUser(user.id);
+    if (!principal) return false;
+    const principalKey = authorizationKey(
+      principal.tipo_alcance,
+      principal.territorio_codigo,
+      principal.region || ""
+    );
+    return userAuthorizationRows(user.id).some(
+      (scope) =>
+        authorizationKey(
+          scope.tipo_alcance,
+          scope.territorio_codigo,
+          scope.region || ""
+        ) !== principalKey
+    );
+  }).length;
+
+  const approvers = ordinaryUsers.filter((user) =>
+    userAuthorizationRows(user.id).some((scope) => scope.puede_aprobar)
+  ).length;
+
+  const inactiveWithAccess = ordinaryUsers.filter(
+    (user) => !user.activo && userAuthorizationRows(user.id).length > 0
+  ).length;
+
+  const territoryByCode = new Map(
+    state.assignableTerritories.map((item) => [item.codigo, item])
+  );
+
+  const summary = `
+    <section class="authorization-summary-grid">
+      <article class="authorization-summary-card">
+        <span>Usuarios activos</span><strong>${activeUsers.length}</strong>
+      </article>
+      <article class="authorization-summary-card warning">
+        <span>Con asignaciones adicionales</span><strong>${withAdditional}</strong>
+      </article>
+      <article class="authorization-summary-card">
+        <span>Con capacidad de aprobar</span><strong>${approvers}</strong>
+      </article>
+      <article class="authorization-summary-card ${inactiveWithAccess ? "danger" : ""}">
+        <span>Inactivos con autorizaciones</span><strong>${inactiveWithAccess}</strong>
+      </article>
+    </section>
+  `;
+
+  const coverage = state.assignableTerritories.map((territory) => {
+    const assignedUsers = ordinaryUsers.filter((user) =>
+      state.allAssignments.some(
+        (assignment) =>
+          assignment.usuario_id === user.id &&
+          assignment.territorio_codigo === territory.codigo &&
+          assignment.activo !== false &&
+          assignment.puede_ver === true
+      )
+    );
+
+    const approvalUsers = assignedUsers.filter((user) =>
+      state.allAssignments.some(
+        (assignment) =>
+          assignment.usuario_id === user.id &&
+          assignment.territorio_codigo === territory.codigo &&
+          assignment.activo !== false &&
+          assignment.puede_aprobar === true
+      )
+    );
+
+    const principals = assignedUsers.filter((user) => {
+      const principal = principalForUser(user.id);
+      return (
+        principal?.tipo_alcance === "TERRITORIO" &&
+        principal.territorio_codigo === territory.codigo
+      );
+    });
+
     return `
-      <article class="coverage-card ${complete ? "" : "warning"}">
+      <article class="coverage-card">
         <strong>${escapeHtml(territory.nombre)}</strong>
-        <span>${count} de 2 usuarios activos</span>
-        <div class="coverage-progress"><i style="width:${width}%"></i></div>
+        <span>${assignedUsers.length} usuario${assignedUsers.length === 1 ? "" : "s"} · ${principals.length} principal${principals.length === 1 ? "" : "es"} · ${approvalUsers.length} aprobador${approvalUsers.length === 1 ? "" : "es"}</span>
+        <div class="coverage-user-list">
+          ${assignedUsers.map((user) => `
+            <small>${escapeHtml(user.nombre_completo || user.usuario_login)}</small>
+          `).join("") || '<small class="muted">Sin usuario asignado</small>'}
+        </div>
       </article>
     `;
   }).join("");
+
+  els.territoryCoverage.innerHTML = summary + `
+    <section class="authorization-coverage-section">
+      <div class="authorization-section-title">
+        <h3>Cobertura por territorio</h3>
+        <p>La región se administra dentro de “Administrar autorizaciones” de cada usuario.</p>
+      </div>
+      <div class="coverage-grid">${coverage}</div>
+    </section>
+  `;
 }
 
 function filteredUsers() {
@@ -2365,6 +2543,7 @@ function renderUsers() {
   const territoryByCode = new Map(
     state.assignableTerritories.map((item) => [item.codigo, item])
   );
+
   els.usersCount.textContent = `${users.length} usuario${
     users.length === 1 ? "" : "s"
   }`;
@@ -2375,104 +2554,116 @@ function renderUsers() {
     return;
   }
 
-  els.usersBody.innerHTML = users
-    .map((user) => {
-      const assignments = state.allAssignments.filter(
-        (item) => item.usuario_id === user.id && item.puede_ver
-      );
-      const regionalAssignments = state.allRegionalAssignments.filter(
-        (item) => item.usuario_id === user.id && item.puede_ver
-      );
-      const isSelf = user.id === state.user.id;
+  els.usersBody.innerHTML = users.map((user) => {
+    const isSelf = user.id === state.user.id;
+    const scopes = userAuthorizationRows(user.id);
+    const principal = principalForUser(user.id);
+    const principalKey = principal
+      ? authorizationKey(
+          principal.tipo_alcance,
+          principal.territorio_codigo,
+          principal.region || ""
+        )
+      : null;
 
-      const territorialChips = assignments.map(
-        (assignment) =>
-          `<span class="territory-chip">${escapeHtml(
-            territoryByCode.get(assignment.territorio_codigo)?.nombre ||
-              assignment.territorio_codigo
-          )}${assignment.puede_editar ? " · edita" : ""}</span>`
-      );
+    const principalScope = scopes.find(
+      (scope) =>
+        authorizationKey(
+          scope.tipo_alcance,
+          scope.territorio_codigo,
+          scope.region || ""
+        ) === principalKey
+    );
 
-      const regionalChips = regionalAssignments.map((assignment) => {
-        const territoryName =
-          territoryByCode.get(assignment.territorio_codigo)?.nombre ||
-          assignment.territorio_codigo;
+    const additionalScopes = scopes.filter(
+      (scope) =>
+        authorizationKey(
+          scope.tipo_alcance,
+          scope.territorio_codigo,
+          scope.region || ""
+        ) !== principalKey
+    );
 
-        return `<span class="territory-chip">Regional · ${escapeHtml(
-          territoryName
-        )} · Región ${escapeHtml(assignment.region)}${
-          assignment.puede_editar ? " · edita" : ""
-        }</span>`;
-      });
+    const principalChip = principalScope
+      ? `
+        <span class="territory-chip authorization-principal">
+          <b>Principal</b> · ${escapeHtml(scopeDisplayName(principalScope, territoryByCode))}
+          · ${escapeHtml(capabilityLabel(principalScope))}
+        </span>
+      `
+      : user.rol === "ADMINISTRADOR"
+        ? '<span class="territory-chip authorization-principal">Administración general</span>'
+        : '<span class="territory-chip authorization-missing">Sin alcance principal</span>';
 
-      const chips = [...territorialChips, ...regionalChips];
+    const additionalChips = additionalScopes.map(
+      (scope) => `
+        <span class="territory-chip authorization-additional">
+          ⚠ Adicional / transitoria · ${escapeHtml(
+            scopeDisplayName(scope, territoryByCode)
+          )} · ${escapeHtml(capabilityLabel(scope))}
+        </span>
+      `
+    ).join("");
 
-      return `
-      <tr>
+    const approvalCount = scopes.filter((scope) => scope.puede_aprobar).length;
+
+    return `
+      <tr class="${additionalScopes.length ? "user-has-additional" : ""}">
         <td class="user-name-cell">
-          <strong>${escapeHtml(
-            user.nombre_completo || user.usuario_login
-          )}</strong>
+          <strong>${escapeHtml(user.nombre_completo || user.usuario_login)}</strong>
           <small>@${escapeHtml(user.usuario_login)}${
             user.debe_cambiar_contrasena
               ? " · cambio de contraseña pendiente"
               : ""
           }</small>
+          ${additionalScopes.length
+            ? `<small class="authorization-alert-text">⚠ ${additionalScopes.length} autorización${additionalScopes.length === 1 ? "" : "es"} adicional${additionalScopes.length === 1 ? "" : "es"} para revisión.</small>`
+            : ""}
         </td>
         <td>
-          <select class="role-select user-role-select" data-user-id="${
-            user.id
-          }" ${isSelf ? "disabled" : ""}>
-            <option value="USUARIO" ${
-              user.rol === "USUARIO" ? "selected" : ""
-            }>USUARIO</option>
-            <option value="ADMINISTRADOR" ${
-              user.rol === "ADMINISTRADOR" ? "selected" : ""
-            }>ADMINISTRADOR</option>
+          <select class="role-select user-role-select" data-user-id="${user.id}" ${
+            isSelf ? "disabled" : ""
+          }>
+            <option value="USUARIO" ${user.rol === "USUARIO" ? "selected" : ""}>USUARIO</option>
+            <option value="ADMINISTRADOR" ${user.rol === "ADMINISTRADOR" ? "selected" : ""}>ADMINISTRADOR</option>
           </select>
+          ${approvalCount
+            ? `<small class="approval-capability">${approvalCount} alcance${approvalCount === 1 ? "" : "s"} con aprobación</small>`
+            : ""}
         </td>
         <td>
           <div class="territory-chips">
-            ${
-              chips.length
-                ? chips.join("")
-                : '<span class="muted">Sin territorio asignado</span>'
-            }
+            ${principalChip}
+            ${additionalChips}
           </div>
         </td>
-        <td><span class="status ${
-          user.activo ? "active" : "inactive"
-        }">${user.activo ? "Activo" : "Inactivo"}</span><small class="muted">${
-        user.ultimo_acceso
-          ? `Último acceso: ${escapeHtml(formatDate(user.ultimo_acceso))}`
-          : "Sin acceso registrado"
-      }</small></td>
+        <td>
+          <span class="status ${user.activo ? "active" : "inactive"}">${
+            user.activo ? "Activo" : "Inactivo"
+          }</span>
+          <small class="muted">${
+            user.ultimo_acceso
+              ? `Último acceso: ${escapeHtml(formatDate(user.ultimo_acceso))}`
+              : "Sin acceso registrado"
+          }</small>
+        </td>
         <td>
           <div class="actions">
-            <button class="button ghost small user-permissions" data-user-id="${
-              user.id
-            }" type="button" ${
-        user.rol === "ADMINISTRADOR" ? "disabled" : ""
-      }>Permisos</button>
-            <button class="button ghost small user-password" data-user-id="${
-              user.id
-            }" type="button">Contraseña</button>
-            <button class="button secondary small user-toggle" data-user-id="${
-              user.id
-            }" data-active="${user.activo}" type="button" ${
-        isSelf ? "disabled" : ""
-      }>${user.activo ? "Desactivar" : "Activar"}</button>
-            <button class="button danger small user-delete" data-user-id="${
-              user.id
-            }" type="button" ${
-        isSelf ? "disabled" : ""
-      }>Eliminar</button>
+            <button class="button ghost small user-permissions" data-user-id="${user.id}" type="button" ${
+              user.rol === "ADMINISTRADOR" ? "disabled" : ""
+            }>Administrar autorizaciones</button>
+            <button class="button ghost small user-password" data-user-id="${user.id}" type="button">Contraseña</button>
+            <button class="button secondary small user-toggle" data-user-id="${user.id}" data-active="${user.activo}" type="button" ${
+              isSelf ? "disabled" : ""
+            }>${user.activo ? "Desactivar" : "Activar"}</button>
+            <button class="button danger small user-delete" data-user-id="${user.id}" type="button" ${
+              isSelf ? "disabled" : ""
+            }>Eliminar</button>
           </div>
         </td>
       </tr>
     `;
-    })
-    .join("");
+  }).join("");
 }
 
 async function createUser(event) {
@@ -2489,34 +2680,36 @@ async function createUser(event) {
     formData.get("territorio_codigo") || ""
   );
   const canEdit = formData.get("puede_editar") === "on";
+  const canApprove = formData.get("puede_aprobar") === "on";
+  const region = String(formData.get("region") || "");
+  const userLogin = String(formData.get("usuario_login") || "").trim();
 
   try {
     const payload = {
       action: "create_user",
-      usuario_login: String(
-        formData.get("usuario_login") || ""
-      ).trim(),
+      usuario_login: userLogin,
       nombre_completo: String(
         formData.get("nombre_completo") || ""
       ).trim(),
       contrasena: String(formData.get("contrasena") || ""),
-      tipo_asignacion: assignmentType === "CIRCUNSCRIPCION" ? "TERRITORIAL" : assignmentType
+      tipo_asignacion:
+        assignmentType === "CIRCUNSCRIPCION"
+          ? "TERRITORIAL"
+          : assignmentType
     };
 
     if (assignmentType === "REGIONAL") {
       payload.territorio_codigo = territoryCode;
-      payload.region = String(formData.get("region") || "");
+      payload.region = region;
       payload.puede_ver = true;
       payload.puede_editar = canEdit;
     } else {
       payload.territorios = territoryCode
-        ? [
-            {
-              territorio_codigo: territoryCode,
-              puede_ver: true,
-              puede_editar: canEdit
-            }
-          ]
+        ? [{
+            territorio_codigo: territoryCode,
+            puede_ver: true,
+            puede_editar: canEdit
+          }]
         : [];
     }
 
@@ -2525,10 +2718,83 @@ async function createUser(event) {
       payload
     );
 
-    const selectedTerritoryName = state.assignableTerritories.find((item) => item.codigo === territoryCode)?.nombre || territoryCode;
+    let createdUserId =
+      result?.usuario?.id ||
+      result?.usuario?.usuario_id ||
+      result?.usuario_id ||
+      null;
+
+    if (!createdUserId) {
+      const { data: createdProfile, error: createdProfileError } =
+        await supabase
+          .from("perfiles")
+          .select("id")
+          .eq("usuario_login_normalizado", userLogin.toLowerCase())
+          .single();
+
+      if (createdProfileError) throw createdProfileError;
+      createdUserId = createdProfile?.id;
+    }
+
+    if (!createdUserId) {
+      throw new Error(
+        "El usuario fue creado, pero no fue posible registrar su alcance principal."
+      );
+    }
+
+    const authorization = assignmentType === "REGIONAL"
+      ? {
+          tipo_alcance: "REGION",
+          territorio_codigo: territoryCode,
+          region,
+          puede_ver: true,
+          puede_editar: canEdit,
+          puede_aprobar: canApprove
+        }
+      : {
+          tipo_alcance: "TERRITORIO",
+          territorio_codigo: territoryCode,
+          region: null,
+          puede_ver: true,
+          puede_editar: canEdit,
+          puede_aprobar: canApprove
+        };
+
+    const principal = {
+      tipo_alcance: authorization.tipo_alcance,
+      territorio_codigo: authorization.territorio_codigo,
+      region: authorization.region
+    };
+
+    const { data: authorizationResult, error: authorizationError } =
+      await supabase.rpc(
+        "sigep_admin_guardar_autorizaciones_usuario",
+        {
+          p_usuario_id: createdUserId,
+          p_autorizaciones: [authorization],
+          p_principal: principal,
+          p_motivo: "Asignación inicial al crear el usuario."
+        }
+      );
+
+    if (authorizationError) throw authorizationError;
+
+    const authorizationPayload = normalizeRpcPayload(authorizationResult);
+    if (!authorizationPayload || authorizationPayload.ok !== true) {
+      throw new Error(
+        authorizationPayload?.mensaje ||
+        "No fue posible guardar el alcance inicial."
+      );
+    }
+
+    const selectedTerritoryName =
+      state.assignableTerritories.find(
+        (item) => item.codigo === territoryCode
+      )?.nombre || territoryCode;
+
     const assignmentMessage = assignmentType === "REGIONAL"
-      ? ` como regional de la Región ${result.asignacion?.region || ""}`
-      : (assignmentType === "CIRCUNSCRIPCION" ? ` para ${selectedTerritoryName}` : "");
+      ? ` como responsable de la Región ${region}`
+      : ` para ${selectedTerritoryName}`;
 
     showLocalMessage(
       els.createUserMessage,
@@ -2540,6 +2806,9 @@ async function createUser(event) {
     els.assignmentType.value = "TERRITORIAL";
     els.createUserForm.elements.puede_ver.checked = true;
     els.createUserForm.elements.puede_editar.checked = true;
+    if (els.createUserForm.elements.puede_aprobar) {
+      els.createUserForm.elements.puede_aprobar.checked = false;
+    }
     updateCreateUserAssignmentFields();
     await loadAdminData();
   } catch (error) {
@@ -2558,39 +2827,117 @@ function openPermissions(userId) {
   if (!user || user.rol === "ADMINISTRADOR") return;
 
   state.selectedUserId = userId;
-  state.selectedPermissionType = getUserAssignmentType(userId);
+  state.selectedPermissionType = "ACUMULATIVO";
   hideLocalMessage(els.permissionsMessage);
 
-  els.permissionsTitle.textContent = `Permisos de ${
+  els.permissionsTitle.textContent = `Autorizaciones de ${
     user.nombre_completo || user.usuario_login
   }`;
+  els.permissionsDescription.textContent =
+    "Marque un único alcance principal. Todo alcance activo distinto del principal será identificado en rojo como adicional o transitorio.";
 
-  if (state.selectedPermissionType === "REGIONAL") {
-    els.permissionsDescription.textContent =
-      "Seleccione las regiones que puede consultar o editar. Cada región incluye su estructura regional y sus zonas.";
+  const territoryByCode = new Map(
+    state.assignableTerritories.map((item) => [item.codigo, item])
+  );
 
-    const assignmentMap = new Map(
-      state.allRegionalAssignments
-        .filter((item) => item.usuario_id === userId)
-        .map((item) => [
-          `${item.territorio_codigo}|${item.region}`,
-          item
-        ])
-    );
-
-    const territoryByCode = new Map(
-      state.assignableTerritories.map((item) => [
-        item.codigo,
+  const assignmentMap = new Map(
+    state.allAssignments
+      .filter((item) => item.usuario_id === userId)
+      .map((item) => [
+        authorizationKey("TERRITORIO", item.territorio_codigo, ""),
         item
       ])
+  );
+
+  const regionalAssignmentMap = new Map(
+    state.allRegionalAssignments
+      .filter((item) => item.usuario_id === userId)
+      .map((item) => [
+        authorizationKey("REGION", item.territorio_codigo, item.region),
+        item
+      ])
+  );
+
+  const principal = principalForUser(userId);
+  const principalKey = principal
+    ? authorizationKey(
+        principal.tipo_alcance,
+        principal.territorio_codigo,
+        principal.region || ""
+      )
+    : null;
+
+  const territoryGroups = [
+    ["PROVINCIA", "Provincia"],
+    ["CIRCUNSCRIPCION", "Circunscripciones"],
+    ["MUNICIPIO", "Municipios"],
+    ["DISTRITO MUNICIPAL", "Distritos municipales"]
+  ];
+
+  const territorialHtml = territoryGroups.map(([type, title]) => {
+    const territories = state.assignableTerritories.filter(
+      (item) => String(item.tipo || "").trim().toUpperCase() === type
     );
 
-    els.permissionsBody.innerHTML = state.regionalStructures
-      .map((regionStructure) => {
-        const key = `${regionStructure.territorio_codigo}|${regionStructure.region}`;
+    if (!territories.length) return "";
+
+    return `
+      <tr class="permission-section-row">
+        <td colspan="5"><strong>${escapeHtml(title)}</strong></td>
+      </tr>
+      ${territories.map((territory) => {
+        const key = authorizationKey("TERRITORIO", territory.codigo, "");
         const assignment = assignmentMap.get(key);
         const canView = assignment?.puede_ver === true;
         const canEdit = assignment?.puede_editar === true;
+        const canApprove = assignment?.puede_aprobar === true;
+        const isPrincipal = key === principalKey;
+        const isAdditional = canView && !isPrincipal;
+
+        return `
+          <tr
+            class="permission-row ${isAdditional ? "is-additional" : ""}"
+            data-scope-type="TERRITORIO"
+            data-territory-code="${escapeHtml(territory.codigo)}"
+            data-region=""
+          >
+            <td>
+              <strong>${escapeHtml(territory.nombre)}</strong>
+              <small class="${isAdditional ? "authorization-alert-text" : "muted"}">
+                ${isPrincipal
+                  ? "Alcance principal"
+                  : isAdditional
+                    ? "⚠ Autorización adicional / transitoria"
+                    : escapeHtml(territory.tipo)}
+              </small>
+            </td>
+            <td><input class="permission-primary" name="principal-scope" type="radio" ${isPrincipal ? "checked" : ""}></td>
+            <td><input class="permission-view" type="checkbox" ${canView ? "checked" : ""}></td>
+            <td><input class="permission-edit" type="checkbox" ${canEdit ? "checked" : ""} ${canView ? "" : "disabled"}></td>
+            <td><input class="permission-approve" type="checkbox" ${canApprove ? "checked" : ""} ${canView ? "" : "disabled"}></td>
+          </tr>
+        `;
+      }).join("")}
+    `;
+  }).join("");
+
+  const regionalHtml = state.regionalStructures.length
+    ? `
+      <tr class="permission-section-row">
+        <td colspan="5"><strong>Regiones</strong></td>
+      </tr>
+      ${state.regionalStructures.map((regionStructure) => {
+        const key = authorizationKey(
+          "REGION",
+          regionStructure.territorio_codigo,
+          regionStructure.region
+        );
+        const assignment = regionalAssignmentMap.get(key);
+        const canView = assignment?.puede_ver === true;
+        const canEdit = assignment?.puede_editar === true;
+        const canApprove = assignment?.puede_aprobar === true;
+        const isPrincipal = key === principalKey;
+        const isAdditional = canView && !isPrincipal;
         const territoryName =
           territoryByCode.get(regionStructure.territorio_codigo)?.nombre ||
           regionStructure.municipio ||
@@ -2598,151 +2945,117 @@ function openPermissions(userId) {
 
         return `
           <tr
-            data-territory-code="${escapeHtml(
-              regionStructure.territorio_codigo
-            )}"
+            class="permission-row ${isAdditional ? "is-additional" : ""}"
+            data-scope-type="REGION"
+            data-territory-code="${escapeHtml(regionStructure.territorio_codigo)}"
             data-region="${escapeHtml(regionStructure.region)}"
           >
             <td>
-              <strong>${escapeHtml(
-                territoryName
-              )} · Región ${escapeHtml(regionStructure.region)}</strong>
-              <small class="muted">Asignación regional</small>
+              <strong>${escapeHtml(territoryName)} · Región ${escapeHtml(regionStructure.region)}</strong>
+              <small class="${isAdditional ? "authorization-alert-text" : "muted"}">
+                ${isPrincipal
+                  ? "Alcance principal"
+                  : isAdditional
+                    ? "⚠ Autorización adicional / transitoria"
+                    : "Asignación regional"}
+              </small>
             </td>
-            <td><input class="permission-view" type="checkbox" ${
-              canView ? "checked" : ""
-            }></td>
-            <td><input class="permission-edit" type="checkbox" ${
-              canEdit ? "checked" : ""
-            } ${canView ? "" : "disabled"}></td>
+            <td><input class="permission-primary" name="principal-scope" type="radio" ${isPrincipal ? "checked" : ""}></td>
+            <td><input class="permission-view" type="checkbox" ${canView ? "checked" : ""}></td>
+            <td><input class="permission-edit" type="checkbox" ${canEdit ? "checked" : ""} ${canView ? "" : "disabled"}></td>
+            <td><input class="permission-approve" type="checkbox" ${canApprove ? "checked" : ""} ${canView ? "" : "disabled"}></td>
           </tr>
         `;
-      })
-      .join("");
-  } else {
-    els.permissionsDescription.textContent =
-      "Seleccione los territorios que puede consultar o editar.";
+      }).join("")}
+    `
+    : "";
 
-    const assignmentMap = new Map(
-      state.allAssignments
-        .filter((item) => item.usuario_id === userId)
-        .map((item) => [item.territorio_codigo, item])
-    );
-
-    els.permissionsBody.innerHTML = state.assignableTerritories
-      .map((territory) => {
-        const assignment = assignmentMap.get(territory.codigo);
-        const canView = assignment?.puede_ver === true;
-        const canEdit = assignment?.puede_editar === true;
-        return `
-          <tr data-territory-code="${escapeHtml(territory.codigo)}">
-            <td><strong>${escapeHtml(
-              territory.nombre
-            )}</strong><small class="muted">${escapeHtml(
-          territory.tipo
-        )}</small></td>
-            <td><input class="permission-view" type="checkbox" ${
-              canView ? "checked" : ""
-            }></td>
-            <td><input class="permission-edit" type="checkbox" ${
-              canEdit ? "checked" : ""
-            } ${canView ? "" : "disabled"}></td>
-          </tr>
-        `;
-      })
-      .join("");
-  }
-
+  els.permissionsBody.innerHTML = territorialHtml + regionalHtml;
   els.permissionsModal.showModal();
 }
 
 async function savePermissions() {
   if (!state.selectedUserId) return;
+
   hideLocalMessage(els.permissionsMessage);
   els.savePermissions.disabled = true;
   els.savePermissions.textContent = "Guardando…";
 
   const rows = [
-    ...els.permissionsBody.querySelectorAll(
-      "tr[data-territory-code]"
-    )
+    ...els.permissionsBody.querySelectorAll("tr.permission-row")
   ];
 
   try {
-    if (state.selectedPermissionType === "REGIONAL") {
-      const assignments = rows
-        .map((row) => ({
-          usuario_id: state.selectedUserId,
-          territorio_codigo: row.dataset.territoryCode,
-          region: row.dataset.region,
-          puede_ver: row.querySelector(".permission-view").checked,
-          puede_editar:
-            row.querySelector(".permission-edit").checked,
-          activo: true
-        }))
-        .filter((item) => item.puede_ver)
-        .map((item) => ({
-          ...item,
-          puede_editar: item.puede_ver && item.puede_editar
-        }));
+    const principalRow = rows.find(
+      (row) => row.querySelector(".permission-primary")?.checked
+    );
 
-      const { error: deleteError } = await supabase
-        .from("usuario_regiones")
-        .delete()
-        .eq("usuario_id", state.selectedUserId);
-      if (deleteError) throw deleteError;
+    if (!principalRow) {
+      throw new Error("Seleccione un alcance principal.");
+    }
 
-      if (assignments.length) {
-        const { error: insertError } = await supabase
-          .from("usuario_regiones")
-          .insert(assignments);
-        if (insertError) throw insertError;
+    const authorizations = rows.map((row) => {
+      const view = row.querySelector(".permission-view")?.checked === true;
+      const edit = row.querySelector(".permission-edit")?.checked === true;
+      const approve =
+        row.querySelector(".permission-approve")?.checked === true;
+      const principal =
+        row.querySelector(".permission-primary")?.checked === true;
+
+      return {
+        tipo_alcance: row.dataset.scopeType,
+        territorio_codigo: row.dataset.territoryCode,
+        region: row.dataset.region || null,
+        puede_ver: view || edit || approve || principal,
+        puede_editar: edit,
+        puede_aprobar: approve
+      };
+    }).filter((item) => item.puede_ver);
+
+    const principal = {
+      tipo_alcance: principalRow.dataset.scopeType,
+      territorio_codigo: principalRow.dataset.territoryCode,
+      region: principalRow.dataset.region || null
+    };
+
+    const { data, error } = await supabase.rpc(
+      "sigep_admin_guardar_autorizaciones_usuario",
+      {
+        p_usuario_id: state.selectedUserId,
+        p_autorizaciones: authorizations,
+        p_principal: principal,
+        p_motivo:
+          "Actualización desde Usuarios, autorizaciones y aprobaciones."
       }
-    } else {
-      const assignments = rows
-        .map((row) => ({
-          usuario_id: state.selectedUserId,
-          territorio_codigo: row.dataset.territoryCode,
-          puede_ver: row.querySelector(".permission-view").checked,
-          puede_editar:
-            row.querySelector(".permission-edit").checked,
-          activo: true
-        }))
-        .filter((item) => item.puede_ver)
-        .map((item) => ({
-          ...item,
-          puede_editar: item.puede_ver && item.puede_editar
-        }));
+    );
 
-      const { error: deleteError } = await supabase
-        .from("usuario_territorios")
-        .delete()
-        .eq("usuario_id", state.selectedUserId);
-      if (deleteError) throw deleteError;
+    if (error) throw error;
 
-      if (assignments.length) {
-        const { error: insertError } = await supabase
-          .from("usuario_territorios")
-          .insert(assignments);
-        if (insertError) throw insertError;
-      }
+    const payload = normalizeRpcPayload(data);
+    if (!payload || payload.ok !== true) {
+      throw new Error(
+        payload?.mensaje ||
+        payload?.codigo_resultado ||
+        "No se pudieron guardar las autorizaciones."
+      );
     }
 
     showLocalMessage(
       els.permissionsMessage,
-      "Permisos actualizados.",
+      "Autorizaciones actualizadas y registradas en auditoría.",
       "success"
     );
+
     await loadAdminData();
-    setTimeout(() => els.permissionsModal.close(), 650);
+    setTimeout(() => els.permissionsModal.close(), 700);
   } catch (error) {
     showLocalMessage(
       els.permissionsMessage,
-      error.message || "No se pudieron guardar los permisos."
+      error.message || "No se pudieron guardar las autorizaciones."
     );
   } finally {
     els.savePermissions.disabled = false;
-    els.savePermissions.textContent = "Guardar permisos";
+    els.savePermissions.textContent = "Guardar autorizaciones";
   }
 }
 
@@ -3128,7 +3441,7 @@ bindProvincialInterface();
 bindCircunscriptionInterface();
 
 els.approvalsTab.addEventListener("click", () => {
-  if (!state.isAdmin || els.approvalsTab.hidden) return;
+  if (!state.canApprove || els.approvalsTab.hidden) return;
 
   window.location.assign("aprobaciones/aprobaciones.html");
 });
@@ -3248,15 +3561,71 @@ els.usersBody.addEventListener("click", async (event) => {
 });
 
 els.permissionsBody.addEventListener("change", (event) => {
-  const row = event.target.closest("tr[data-territory-code]");
+  const row = event.target.closest("tr.permission-row");
   if (!row) return;
+
+  const principal = row.querySelector(".permission-primary");
   const view = row.querySelector(".permission-view");
   const edit = row.querySelector(".permission-edit");
+  const approve = row.querySelector(".permission-approve");
+
   if (event.target === view) {
     edit.disabled = !view.checked;
-    if (!view.checked) edit.checked = false;
+    approve.disabled = !view.checked;
+
+    if (!view.checked) {
+      edit.checked = false;
+      approve.checked = false;
+      if (principal.checked) principal.checked = false;
+    }
   }
-  if (event.target === edit && edit.checked) view.checked = true;
+
+  if (event.target === edit && edit.checked) {
+    view.checked = true;
+    edit.disabled = false;
+    approve.disabled = false;
+  }
+
+  if (event.target === approve && approve.checked) {
+    view.checked = true;
+    edit.disabled = false;
+    approve.disabled = false;
+  }
+
+  if (event.target === principal && principal.checked) {
+    view.checked = true;
+    edit.disabled = false;
+    approve.disabled = false;
+  }
+
+  for (const permissionRow of els.permissionsBody.querySelectorAll(
+    "tr.permission-row"
+  )) {
+    const rowPrincipal =
+      permissionRow.querySelector(".permission-primary")?.checked === true;
+    const rowView =
+      permissionRow.querySelector(".permission-view")?.checked === true;
+
+    permissionRow.classList.toggle(
+      "is-additional",
+      rowView && !rowPrincipal
+    );
+
+    const note = permissionRow.querySelector("td:first-child small");
+    if (note) {
+      note.className =
+        rowView && !rowPrincipal
+          ? "authorization-alert-text"
+          : "muted";
+      note.textContent = rowPrincipal
+        ? "Alcance principal"
+        : rowView
+          ? "⚠ Autorización adicional / transitoria"
+          : permissionRow.dataset.scopeType === "REGION"
+            ? "Asignación regional"
+            : "Sin autorización";
+    }
+  }
 });
 
 els.savePermissions.addEventListener("click", savePermissions);
