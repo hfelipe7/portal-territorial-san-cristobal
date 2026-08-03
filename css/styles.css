@@ -513,110 +513,119 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 }
 
 /* =========================================================
-   Portada institucional V6.1
+   Portada institucional PRM V7.1
    Mantiene intactos los estilos del portal interno.
    ========================================================= */
 .reference-login {
   position: relative;
   min-height: 100svh;
   overflow: hidden;
-  background: #e9f1f7;
+  background: #0046ad;
 }
 
-.reference-login__background {
+.reference-login::before {
+  content: "";
   position: fixed;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: fill;
+  z-index: 0;
   pointer-events: none;
-  user-select: none;
+  background:
+    radial-gradient(circle at 84% 16%, rgba(255,255,255,.18) 0 1px, transparent 2px) 0 0 / 24px 24px,
+    linear-gradient(132deg, #ffffff 0 42.7%, #d9a441 42.8% 43.35%, #064bb7 43.45% 100%);
+}
+
+.reference-login::after {
+  content: "";
+  position: fixed;
+  z-index: 0;
+  right: -11vw;
+  bottom: -30vw;
+  width: 72vw;
+  height: 72vw;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 50%;
+  box-shadow: 0 0 0 7vw rgba(255,255,255,.035), 0 0 0 14vw rgba(255,255,255,.025);
+  pointer-events: none;
 }
 
 .reference-login__stage {
   position: relative;
-  z-index: 2;
+  z-index: 1;
   min-height: 100svh;
+  display: flex;
+  align-items: center;
+  padding: clamp(22px, 3.5vw, 54px);
+}
+
+.reference-login__access {
+  width: min(460px, 100%);
+  margin-left: clamp(48px, 11vw, 168px);
 }
 
 .reference-login__card {
-  position: absolute;
-  top: 11.5%;
-  left: 50%;
-  width: 35.8%;
-  min-width: 520px;
-  max-width: 620px;
-  min-height: 65.8%;
-  padding: clamp(34px, 3vw, 58px) clamp(38px, 3.2vw, 58px) 34px;
-  border: 1px solid rgba(11, 34, 64, .13);
-  border-radius: 18px;
+  position: relative;
+  width: 100%;
+  padding: clamp(24px, 2.25vw, 34px);
+  border: 1px solid rgba(255,255,255,.62);
+  border-radius: 22px;
   background: rgba(255,255,255,.985);
-  box-shadow: 0 22px 52px rgba(9, 35, 66, .22);
-  transform: translateX(-50%);
+  box-shadow: 0 26px 64px rgba(0,31,86,.26);
+  backdrop-filter: blur(12px);
 }
 
 .reference-login__header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
+  justify-content: flex-start;
+  gap: 14px;
   color: #071b3f;
   text-align: left;
 }
 
 .reference-login__header h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.85rem, 2.25vw, 2.75rem);
-  line-height: 1;
-  letter-spacing: -.035em;
-  white-space: nowrap;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: clamp(1.65rem, 1.8vw, 2rem);
+  line-height: 1.05;
+  letter-spacing: -.04em;
+  color: #002e63;
 }
 
 .reference-login__header p {
-  margin: 17px 0 0;
+  margin: 7px 0 0;
   color: #425168;
-  font-size: clamp(1rem, 1.25vw, 1.35rem);
+  font-size: .95rem;
+}
+
+.reference-login__header .reference-login__eyebrow {
+  margin: 0 0 7px;
+  color: #e86f24;
+  font-size: .72rem;
+  font-weight: 850;
+  letter-spacing: .13em;
 }
 
 .reference-login__mark {
   flex: 0 0 auto;
-  width: clamp(58px, 4.3vw, 76px);
-  height: clamp(58px, 4.3vw, 76px);
+  width: clamp(62px, 4.4vw, 72px);
+  height: clamp(62px, 4.4vw, 72px);
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  color: #0b1c3d;
-  background: conic-gradient(from 0deg, #c88f29 0 8%, transparent 8% 12%, #c88f29 12% 20%, transparent 20% 24%, #c88f29 24% 32%, transparent 32% 36%, #c88f29 36% 44%, transparent 44% 48%, #c88f29 48% 56%, transparent 56% 60%, #c88f29 60% 68%, transparent 68% 72%, #c88f29 72% 80%, transparent 80% 84%, #c88f29 84% 92%, transparent 92% 96%, #c88f29 96% 100%);
-  box-shadow: inset 0 0 0 10px #c88f29, inset 0 0 0 16px #fff;
-}
-
-.reference-login__gear {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 3px solid #0b1c3d;
   border-radius: 50%;
   background: #fff;
-  font-size: 0;
+  box-shadow: 0 5px 16px rgba(0,47,99,.16);
+  padding: 3px;
 }
 
-.reference-login__gear::after {
-  content: "";
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #c88f29;
-}
+.reference-login__mark img { width: 100%; height: 100%; object-fit: contain; }
 
 .reference-login__divider {
   position: relative;
-  height: 30px;
-  margin: 10px 0 16px;
+  height: 24px;
+  margin: 8px 0 13px;
   display: grid;
   place-items: center;
-  color: #c88f29;
+  color: #f47721;
 }
 
 .reference-login__divider::before,
@@ -626,7 +635,7 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
   top: 50%;
   width: 43%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(200,143,41,.75));
+  background: linear-gradient(90deg, transparent, rgba(0,68,133,.45));
 }
 
 .reference-login__divider::before { left: 0; }
@@ -635,13 +644,13 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 
 .reference-login__form {
   display: grid;
-  gap: clamp(18px, 2vh, 28px);
+  gap: clamp(12px, 1.5vh, 16px);
 }
 
 .reference-login__field {
-  min-height: clamp(62px, 6.9vh, 74px);
+  min-height: clamp(52px, 5.7vh, 58px);
   display: grid;
-  grid-template-columns: 64px minmax(0,1fr) auto;
+  grid-template-columns: 56px minmax(0,1fr) auto;
   align-items: center;
   overflow: hidden;
   border: 1px solid #c9d1dc;
@@ -651,12 +660,12 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 }
 
 .reference-login__field:focus-within {
-  border-color: #315d91;
-  box-shadow: 0 0 0 4px rgba(24,74,126,.12);
+  border-color: #0072bc;
+  box-shadow: 0 0 0 4px rgba(0,114,188,.12);
 }
 
 .reference-login__icon {
-  width: 64px;
+  width: 56px;
   height: 100%;
   display: grid;
   place-items: center;
@@ -666,8 +675,8 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 }
 
 .reference-login__icon svg {
-  width: 31px;
-  height: 31px;
+  width: 27px;
+  height: 27px;
 }
 
 .reference-login__field input,
@@ -677,10 +686,10 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
   height: 100%;
   border: 0;
   outline: 0;
-  padding: 0 20px;
+  padding: 0 16px;
   color: #1b2c47;
   background: transparent;
-  font-size: clamp(1rem, 1.2vw, 1.35rem);
+  font-size: clamp(.92rem, 1vw, 1rem);
   font-weight: 500;
 }
 
@@ -704,13 +713,13 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 }
 
 .reference-login__submit {
-  min-height: clamp(64px, 7vh, 76px);
+  min-height: clamp(54px, 5.9vh, 60px);
   border: 0;
   border-radius: 8px;
   color: #fff;
-  background: linear-gradient(90deg, #002e5c, #003f77 55%, #002e5c);
+  background: linear-gradient(90deg, #003f7d, #0072bc 58%, #00569b);
   box-shadow: 0 8px 18px rgba(0,47,95,.2);
-  font-size: clamp(1.05rem, 1.35vw, 1.45rem);
+  font-size: clamp(1rem, 1.1vw, 1.1rem);
   font-weight: 650;
   cursor: pointer;
   transition: transform .15s ease, filter .15s ease, opacity .15s ease;
@@ -725,18 +734,58 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 }
 
 .reference-login__support {
-  margin: 18px 0 0;
+  margin: 0;
   color: #7b8594;
   font-size: .78rem;
-  text-align: center;
+  text-align: left;
+}
+
+.reference-login__footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  border-top: 1px solid #e1e8f0;
+}
+
+.reference-login__stdi {
+  width: 154px;
+  height: auto;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.reference-login__signature {
+  width: min(330px, calc(100% - 30px));
+  margin: 12px auto 0;
+  padding: 7px 14px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 1px solid rgba(255,255,255,.9);
+  border-radius: 12px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 12px 30px rgba(0,31,86,.2);
+}
+
+.reference-login__signature span {
+  max-width: 112px;
+  color: #647083;
+  font-size: .66rem;
+  font-weight: 750;
+  line-height: 1.28;
+  text-transform: uppercase;
+  letter-spacing: .045em;
 }
 
 @media (max-width: 1180px) {
-  .reference-login__card {
-    width: 42%;
-    min-width: 480px;
-    top: 10%;
-    min-height: 67%;
+  .reference-login__access {
+    width: min(440px, 47%);
+    min-width: 410px;
+    margin-left: clamp(24px, 6vw, 76px);
   }
   .reference-login__header h1 { font-size: 2rem; }
 }
@@ -744,13 +793,7 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 @media (max-width: 900px) {
   .reference-login {
     overflow: auto;
-    background: #eaf2f8;
-  }
-
-  .reference-login__background {
-    object-fit: cover;
-    object-position: 66% center;
-    filter: saturate(.9) brightness(.86);
+    background: #064bb7;
   }
 
   .reference-login__stage {
@@ -758,17 +801,19 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
     display: grid;
     place-items: center;
     padding: 28px 18px;
-    background: linear-gradient(rgba(2,26,54,.25), rgba(2,26,54,.45));
+    background: linear-gradient(145deg, rgba(0,42,112,.08), rgba(0,36,99,.34));
+  }
+
+  .reference-login__access {
+    position: relative;
+    width: min(560px, 100%);
+    min-width: 0;
+    margin: 0;
   }
 
   .reference-login__card {
-    position: relative;
-    inset: auto;
-    width: min(560px, 100%);
-    min-width: 0;
     min-height: auto;
-    padding: 34px 24px 26px;
-    transform: none;
+    padding: 28px 22px 23px;
   }
 
   .reference-login__header {
@@ -786,17 +831,17 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
   }
 
   .reference-login__mark {
-    width: 58px;
-    height: 58px;
+    width: 64px;
+    height: 64px;
   }
 
   .reference-login__field {
-    min-height: 60px;
-    grid-template-columns: 56px minmax(0,1fr) auto;
+    min-height: 55px;
+    grid-template-columns: 52px minmax(0,1fr) auto;
   }
 
   .reference-login__icon {
-    width: 56px;
+    width: 52px;
   }
 
   .reference-login__field input,
@@ -808,13 +853,11 @@ dialog::backdrop { background: rgba(5,21,37,.64); backdrop-filter: blur(3px); }
 
 @media (max-height: 760px) and (min-width: 901px) {
   .reference-login__card {
-    top: 7%;
-    min-height: 70%;
     padding-top: 28px;
   }
-  .reference-login__form { gap: 14px; }
-  .reference-login__field { min-height: 56px; }
-  .reference-login__submit { min-height: 58px; }
+  .reference-login__form { gap: 11px; }
+  .reference-login__field { min-height: 50px; }
+  .reference-login__submit { min-height: 52px; }
   .reference-login__support { display: none; }
 }
 
