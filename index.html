@@ -8,22 +8,17 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="login-page reference-login">
-  <img
-    class="reference-login__background"
-    src="assets/portada-login.png"
-    alt=""
-    aria-hidden="true"
-  >
-
   <main class="reference-login__stage">
-    <section class="reference-login__card" aria-labelledby="portal-title">
+    <div class="reference-login__access">
+      <section class="reference-login__card" aria-labelledby="portal-title">
       <header class="reference-login__header">
-        <div class="reference-login__mark" aria-hidden="true">
-          <span class="reference-login__gear">⚙</span>
+        <div class="reference-login__mark">
+          <img src="assets/logo-prm.png" alt="Partido Revolucionario Moderno">
         </div>
         <div>
-          <h1 id="portal-title">PORTAL TERRITORIAL</h1>
-          <p>Acceso Centralizado para Usuarios</p>
+          <p class="reference-login__eyebrow">SIGEP · PRM SAN CRISTÓBAL</p>
+          <h1 id="portal-title">Portal Territorial</h1>
+          <p>Gestión institucional de estructuras</p>
         </div>
       </header>
 
@@ -83,8 +78,16 @@
         </button>
       </form>
 
-      <p class="reference-login__support">Acceso autorizado para dirigentes y administradores territoriales.</p>
-    </section>
+      <footer class="reference-login__footer">
+        <p class="reference-login__support">Acceso autorizado para dirigentes y administradores territoriales.</p>
+      </footer>
+      </section>
+
+      <aside class="reference-login__signature" aria-label="Unidad responsable">
+        <span>Desarrollado y administrado por</span>
+        <img class="reference-login__stdi" src="assets/logo-stdi.png" alt="Secretaría de Transformación Digital e Innovación, San Cristóbal">
+      </aside>
+    </div>
   </main>
 
   <script src="js/config.js"></script>
