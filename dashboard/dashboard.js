@@ -1,4 +1,4 @@
-// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_1_1
+// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_5R1
 
 import {
   supabase,
@@ -6,10 +6,10 @@ import {
   escapeHtml
 } from "../js/client.js";
 
-window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_1_1";
+window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_5R1";
 
-const PUBLIC_RPC = "sigep_dashboard_publico_resumen_ligero_v1";
-const DETAIL_RPC = "sigep_dashboard_publico_estructura_detalle_v1";
+const PUBLIC_RPC = "sigep_dashboard_publico_resumen_v1";
+const DETAIL_RPC = "sigep_dashboard_publico_faltantes_v1";
 
 const LEVEL_LABELS = {
   PROVINCIA: "Provincia",
@@ -29,7 +29,6 @@ const state = {
   selectedRegion: "",
   selectedStructureCode: "",
   selectedStructure: null,
-  selectedSections: [],
   detailRows: [],
   detailLoadedFor: "",
   detailRequestId: 0
@@ -518,7 +517,6 @@ function populateStructures() {
 }
 
 function resetDetail() {
-  state.selectedSections = [];
   state.detailRows = [];
   state.detailLoadedFor = "";
   state.detailRequestId += 1;
@@ -827,22 +825,14 @@ function renderComparison() {
 }
 
 function renderSections() {
-  const sections = state.selectedSections;
+  const sections = Array.isArray(state.selectedStructure?.secciones)
+    ? state.selectedStructure.secciones
+    : [];
 
   if (!state.selectedStructureCode) {
     els.sectionCards.innerHTML = `
       <article class="empty-placeholder branded-panel">
         Seleccione una estructura.
-      </article>
-    `;
-    return;
-  }
-
-  if (state.detailLoadedFor !== state.selectedStructureCode) {
-    els.sectionCards.innerHTML = `
-      <article class="empty-placeholder branded-panel">
-        <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-        Cargando secciones…
       </article>
     `;
     return;
@@ -955,38 +945,6 @@ function renderActivePath() {
   ).join("");
 }
 
-function rowMissingFields(row) {
-  return Array.isArray(row?.campos_faltantes)
-    ? row.campos_faltantes.filter((field) =>
-        ["nombre", "cedula", "telefono_principal"].includes(field)
-      )
-    : [];
-}
-
-function safeDetailRows(cargos) {
-  if (!Array.isArray(cargos)) return [];
-
-  return cargos
-    .map((row) => {
-      const missing = rowMissingFields(row);
-
-      // Defensa de privacidad: solo se conservan estas propiedades.
-      return {
-        numero_ficha: Number.isFinite(Number(row?.orden))
-          ? Number(row.orden)
-          : null,
-        cargo: clean(row?.cargo) || "—",
-        seccion_codigo: clean(row?.seccion_codigo),
-        campos_faltantes: missing,
-        nombre: missing.includes("nombre") ? "VACÍO" : "COMPLETO",
-        cedula: missing.includes("cedula") ? "VACÍO" : "COMPLETO",
-        telefono: missing.includes("telefono_principal")
-          ? "VACÍO"
-          : "COMPLETO"
-      };
-    })
-    .filter((row) => row.campos_faltantes.length > 0);
-}
 
 function detailRowsFiltered() {
   const query = normalizeText(els.detailSearch.value);
@@ -1059,7 +1017,6 @@ async function loadSelectedDetail() {
   }
 
   const requestId = ++state.detailRequestId;
-  state.selectedSections = [];
   state.detailRows = [];
   state.detailLoadedFor = "";
 
@@ -1085,24 +1042,41 @@ async function loadSelectedDetail() {
     if (!payload || payload.ok !== true) {
       throw new Error(
         payload?.mensaje ||
-        "La RPC pública de detalle no devolvió un resultado válido."
+        "La RPC pública de fichas pendientes no devolvió un resultado válido."
       );
     }
 
     if (
       payload.solo_lectura !== true ||
-      payload.contiene_datos_personales !== false
+      payload.contiene_datos_personales !== false ||
+      payload.permite_escritura !== false
     ) {
       throw new Error(
         "El detalle no confirmó el contrato de privacidad y solo lectura."
       );
     }
 
-    state.selectedSections = Array.isArray(payload.secciones)
-      ? payload.secciones
+    state.detailRows = Array.isArray(payload.registros)
+      ? payload.registros.map((row) => ({
+          numero_ficha: Number.isFinite(Number(row?.numero_ficha))
+            ? Number(row.numero_ficha)
+            : null,
+          cargo: clean(row?.cargo) || "—",
+          campos_faltantes: Array.isArray(row?.campos_faltantes)
+            ? row.campos_faltantes
+            : [],
+          nombre: clean(row?.nombre).toUpperCase() === "COMPLETO"
+            ? "COMPLETO"
+            : "VACÍO",
+          cedula: clean(row?.cedula).toUpperCase() === "COMPLETO"
+            ? "COMPLETO"
+            : "VACÍO",
+          telefono: clean(row?.telefono).toUpperCase() === "COMPLETO"
+            ? "COMPLETO"
+            : "VACÍO"
+        }))
       : [];
 
-    state.detailRows = safeDetailRows(payload.cargos);
     state.detailLoadedFor = structureCode;
 
     renderSections();
@@ -1112,7 +1086,6 @@ async function loadSelectedDetail() {
 
     console.error("SIGEP Dashboard public detail error:", error);
 
-    state.selectedSections = [];
     state.detailRows = [];
     state.detailLoadedFor = structureCode;
 
