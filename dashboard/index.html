@@ -13,7 +13,7 @@
   >
 
   <link rel="icon" href="../assets/logo-prm.png">
-  <link rel="stylesheet" href="dashboard.css?v=DASHBOARD_TERRITORIAL_V1_0_4">
+  <link rel="stylesheet" href="dashboard.css?v=DASHBOARD_TERRITORIAL_V1_1_1">
 </head>
 
 <body>
@@ -53,7 +53,7 @@
           <h1 id="dashboardTitle">Avance de las estructuras</h1>
           <p class="welcome-copy">
             Consulta porcentajes por nivel, territorio, región, zona, sección y subsección.
-            Los gráficos públicos no muestran información personal.
+            El Dashboard es de solo lectura y no muestra información personal.
           </p>
         </div>
 
@@ -288,79 +288,68 @@
       <section class="dashboard-section detail-section" id="detailSection">
         <div class="section-heading-row detail-heading-row">
           <div>
-            <p class="section-kicker">Última capa · uso operativo</p>
-            <h2>Detalle de cargos y datos pendientes</h2>
+            <p class="section-kicker">Detalle de calidad · público · solo lectura</p>
+            <h2>Cargos con información pendiente</h2>
+            <p>
+              Solo se indica si Nombre, Cédula y Teléfono están COMPLETOS o VACÍOS.
+              No se muestran valores personales y esta vista no puede modificar la base de datos.
+            </p>
           </div>
 
-          <div class="session-chip" id="sessionChip">
-            <span class="session-dot"></span>
-            <span>Verificando sesión…</span>
+          <div class="readonly-chip" aria-label="Modo solo lectura">
+            SOLO LECTURA
           </div>
         </div>
 
-        <article class="detail-access-card branded-panel" id="detailAccessCard">
-          <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-
-          <div>
-            <h3 id="detailAccessTitle">Detalle protegido</h3>
-          </div>
-
-          <div class="detail-actions">
-            <button class="primary-button" id="loadDetailButton" type="button" hidden>
-              Cargar detalle operativo
-            </button>
-
-            <a class="secondary-button" id="loginLink" href="../index.html">
-              Iniciar sesión
-            </a>
-          </div>
-        </article>
-
-        <div class="detail-workspace" id="detailWorkspace" hidden>
+        <div class="detail-workspace">
           <div class="detail-toolbar branded-panel">
             <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
 
             <label class="control detail-search-control">
-              <span>Buscar</span>
+              <span>Buscar cargo</span>
               <input
                 id="detailSearch"
                 type="search"
-                placeholder="Cargo o campo pendiente"
+                placeholder="Ej.: Miembro"
                 autocomplete="off"
               >
             </label>
 
             <label class="control">
-              <span>Estado</span>
-              <select id="detailStatusFilter">
-                <option value="TODOS">Todos</option>
-                <option value="VACANTE">Vacantes</option>
-                <option value="INCOMPLETA">Datos incompletos</option>
-                <option value="COMPLETA">Completos</option>
-              </select>
-            </label>
-
-            <label class="control">
-              <span>Falta</span>
+              <span>Mostrar cuando falta</span>
               <select id="detailMissingFilter">
                 <option value="TODOS">Cualquier campo</option>
                 <option value="nombre">Nombre</option>
                 <option value="cedula">Cédula</option>
-                <option value="telefono_principal">Teléfono principal</option>
+                <option value="telefono_principal">Teléfono</option>
               </select>
             </label>
+
+            <div class="detail-count-box" aria-live="polite">
+              <span>Fichas incompletas</span>
+              <strong id="detailCount">—</strong>
+            </div>
           </div>
 
           <div class="detail-table-card branded-panel">
             <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
 
-            <div class="table-scroll">
+            <div class="detail-loading" id="detailLoading" aria-live="polite">
+              Cargando cargos de la estructura seleccionada…
+            </div>
+
+            <div class="table-scroll" id="detailTableScroll" hidden>
               <table class="detail-table">
+                <caption class="sr-only">
+                  Fichas con al menos un dato pendiente. No contiene información personal.
+                </caption>
                 <thead>
                   <tr>
-                    <th>Cargo</th>
-                    <th>Estado</th>
-                    <th>Falta</th>
+                    <th scope="col"># ficha</th>
+                    <th scope="col">Cargo</th>
+                    <th scope="col">Nombre</th>
+                    <th scope="col">Cédula</th>
+                    <th scope="col">Teléfono</th>
                   </tr>
                 </thead>
                 <tbody id="detailTableBody"></tbody>
@@ -368,7 +357,7 @@
             </div>
 
             <div class="detail-empty" id="detailEmpty" hidden>
-              No hay fichas que coincidan con este filtro.
+              No hay fichas incompletas que coincidan con este filtro.
             </div>
           </div>
         </div>
@@ -388,6 +377,6 @@
   <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
   <script src="../js/config.js"></script>
-  <script type="module" src="dashboard.js?v=DASHBOARD_TERRITORIAL_V1_0_4"></script>
+  <script type="module" src="dashboard.js?v=DASHBOARD_TERRITORIAL_V1_1_1"></script>
 </body>
 </html>

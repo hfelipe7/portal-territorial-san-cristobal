@@ -1,4 +1,4 @@
-// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_4
+// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_1_1
 
 import {
   supabase,
@@ -6,19 +6,10 @@ import {
   escapeHtml
 } from "../js/client.js";
 
-window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_4";
+window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_1_1";
 
-const PUBLIC_RPC = "sigep_dashboard_publico_resumen_v1";
-const DETAIL_RPC = "sigep_dashboard_detalle_estructura_v1";
-
-const LEVEL_ORDER = [
-  "PROVINCIA",
-  "CIRCUNSCRIPCION",
-  "MUNICIPIO",
-  "DISTRITO MUNICIPAL",
-  "REGION",
-  "ZONA"
-];
+const PUBLIC_RPC = "sigep_dashboard_publico_resumen_ligero_v1";
+const DETAIL_RPC = "sigep_dashboard_publico_estructura_detalle_v1";
 
 const LEVEL_LABELS = {
   PROVINCIA: "Provincia",
@@ -38,9 +29,10 @@ const state = {
   selectedRegion: "",
   selectedStructureCode: "",
   selectedStructure: null,
-  session: null,
+  selectedSections: [],
   detailRows: [],
-  detailLoadedFor: ""
+  detailLoadedFor: "",
+  detailRequestId: 0
 };
 
 const els = {
@@ -60,7 +52,6 @@ const els = {
   kpiEmpty: document.querySelector("#kpiEmpty"),
   kpiGlobalLabel: document.querySelector("#kpiGlobalLabel"),
   kpiAverageLabel: document.querySelector("#kpiAverageLabel"),
-  kpiQualityLabel: document.querySelector("#kpiQualityLabel"),
   kpiEmptyLabel: document.querySelector("#kpiEmptyLabel"),
   kpiGlobalNote: document.querySelector("#kpiGlobalNote"),
   kpiAverageNote: document.querySelector("#kpiAverageNote"),
@@ -93,14 +84,11 @@ const els = {
   qualityPhoneBar: document.querySelector("#qualityPhoneBar"),
   qualityCompleteBar: document.querySelector("#qualityCompleteBar"),
 
-  sessionChip: document.querySelector("#sessionChip"),
-  detailAccessTitle: document.querySelector("#detailAccessTitle"),
-  loadDetailButton: document.querySelector("#loadDetailButton"),
-  loginLink: document.querySelector("#loginLink"),
-  detailWorkspace: document.querySelector("#detailWorkspace"),
   detailSearch: document.querySelector("#detailSearch"),
-  detailStatusFilter: document.querySelector("#detailStatusFilter"),
   detailMissingFilter: document.querySelector("#detailMissingFilter"),
+  detailCount: document.querySelector("#detailCount"),
+  detailLoading: document.querySelector("#detailLoading"),
+  detailTableScroll: document.querySelector("#detailTableScroll"),
   detailTableBody: document.querySelector("#detailTableBody"),
   detailEmpty: document.querySelector("#detailEmpty"),
   toastRegion: document.querySelector("#toastRegion")
@@ -108,7 +96,6 @@ const els = {
 
 function parseJson(value) {
   if (value == null) return value;
-
   if (typeof value === "string") {
     try {
       return JSON.parse(value);
@@ -116,7 +103,6 @@ function parseJson(value) {
       return value;
     }
   }
-
   return value;
 }
 
@@ -127,7 +113,7 @@ function clean(value) {
 function normalizeText(value) {
   return clean(value)
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 }
 
@@ -139,8 +125,8 @@ function normalizeRegion(value) {
 }
 
 function numberValue(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function clampPercent(value) {
@@ -166,12 +152,10 @@ function stateClass(value) {
 
 function uniqueBy(items, keyFn) {
   const map = new Map();
-
   for (const item of items) {
     const key = keyFn(item);
     if (!map.has(key)) map.set(key, item);
   }
-
   return [...map.values()];
 }
 
@@ -206,7 +190,8 @@ function structureDisplayName(item) {
   }
 
   if (item.nivel === "CIRCUNSCRIPCION") {
-    return clean(item.estructura_nombre) || `Circunscripción ${clean(item.circunscripcion)}`;
+    return clean(item.estructura_nombre) ||
+      `Circunscripción ${clean(item.circunscripcion)}`;
   }
 
   if (item.nivel === "MUNICIPIO") {
@@ -218,7 +203,7 @@ function structureDisplayName(item) {
   }
 
   if (item.nivel === "REGION") {
-    const region = clean(item.region);
+    const region = normalizeRegion(item.region);
     return region
       ? `Región ${region.padStart(2, "0")} · ${territoryLabel(item)}`
       : clean(item.estructura_nombre);
@@ -239,7 +224,7 @@ function compactComparisonName(item) {
   }
 
   if (item.nivel === "REGION") {
-    return `Región ${clean(item.region).padStart(2, "0")}`;
+    return `Región ${normalizeRegion(item.region).padStart(2, "0")}`;
   }
 
   if (item.nivel === "CIRCUNSCRIPCION") {
@@ -258,17 +243,20 @@ function structureMeta(item) {
     parts.push(`Circunscripción ${clean(item.circunscripcion)}`);
   }
 
-  const territory = territoryLabel(item);
   if (
     item.nivel === "REGION" ||
     item.nivel === "ZONA" ||
     item.nivel === "MUNICIPIO" ||
     item.nivel === "DISTRITO MUNICIPAL"
   ) {
-    parts.push(territory);
+    parts.push(territoryLabel(item));
   }
 
-  if (item.nivel === "ZONA" && normalizeRegion(item.region) !== "0" && clean(item.region)) {
+  if (
+    item.nivel === "ZONA" &&
+    normalizeRegion(item.region) !== "0" &&
+    clean(item.region)
+  ) {
     parts.push(`Región ${normalizeRegion(item.region).padStart(2, "0")}`);
   }
 
@@ -276,12 +264,13 @@ function structureMeta(item) {
     parts.push(clean(item.recinto));
   }
 
-  return parts.length ? parts.join(" · ") : clean(item.provincia) || "San Cristóbal";
+  return parts.length
+    ? parts.join(" · ")
+    : clean(item.provincia) || "San Cristóbal";
 }
 
 function selectedQuality(item) {
   const quality = item?.calidad_datos || {};
-
   return {
     name: clampPercent(quality.porcentaje_nombre),
     cedula: clampPercent(quality.porcentaje_cedula),
@@ -304,23 +293,12 @@ function toast(message, kind = "") {
   const element = document.createElement("div");
   element.className = `toast ${kind}`.trim();
   element.textContent = message;
-
   els.toastRegion.appendChild(element);
-
-  window.setTimeout(() => {
-    element.remove();
-  }, 4200);
+  window.setTimeout(() => element.remove(), 4200);
 }
 
-function clearSelect(select, placeholder = "") {
+function clearSelect(select) {
   select.innerHTML = "";
-
-  if (placeholder) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = placeholder;
-    select.appendChild(option);
-  }
 }
 
 function addOption(select, value, label, selected = false) {
@@ -338,7 +316,10 @@ function structuresForLevel(level = state.selectedLevel) {
 function territoryOptionsForLevel(level) {
   const items = structuresForLevel(level);
 
-  if (["PROVINCIA", "CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"].includes(level)) {
+  if (
+    ["PROVINCIA", "CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"]
+      .includes(level)
+  ) {
     return sortNatural(
       items.map((item) => ({
         value: item.estructura_codigo,
@@ -365,33 +346,38 @@ function territoryOptionsForLevel(level) {
 
 function regionOptionsForTerritory() {
   const items = structuresForLevel(state.selectedLevel)
-    .filter((item) => !state.selectedTerritory || clean(item.territorio_codigo) === state.selectedTerritory);
+    .filter(
+      (item) =>
+        !state.selectedTerritory ||
+        clean(item.territorio_codigo) === state.selectedTerritory
+    );
 
   const regions = uniqueBy(
     items.map((item) => {
       const normalized = normalizeRegion(item.region);
-      const label = normalized === "0" || !normalized
-        ? "Sin región formal"
-        : `Región ${normalized.padStart(2, "0")}`;
-
       return {
         value: normalized,
-        label
+        label:
+          normalized === "0" || !normalized
+            ? "Sin región formal"
+            : `Región ${normalized.padStart(2, "0")}`
       };
     }),
     (entry) => entry.value
   );
 
-  return sortNatural(regions, (entry) => {
-    if (!entry.value || entry.value === "0") return "999";
-    return entry.value;
-  });
+  return sortNatural(regions, (entry) =>
+    !entry.value || entry.value === "0" ? "999" : entry.value
+  );
 }
 
 function candidateStructures() {
   let items = structuresForLevel(state.selectedLevel);
 
-  if (["REGION", "ZONA"].includes(state.selectedLevel) && state.selectedTerritory) {
+  if (
+    ["REGION", "ZONA"].includes(state.selectedLevel) &&
+    state.selectedTerritory
+  ) {
     items = items.filter(
       (item) => clean(item.territorio_codigo) === state.selectedTerritory
     );
@@ -404,25 +390,27 @@ function candidateStructures() {
   }
 
   return sortNatural(items, (item) => {
-    if (item.nivel === "ZONA") return `${clean(item.zona)} ${clean(item.recinto)}`;
-    if (item.nivel === "REGION") return normalizeRegion(item.region).padStart(4, "0");
-    if (item.nivel === "CIRCUNSCRIPCION") return clean(item.circunscripcion);
+    if (item.nivel === "ZONA") {
+      return `${clean(item.zona)} ${clean(item.recinto)}`;
+    }
+    if (item.nivel === "REGION") {
+      return normalizeRegion(item.region).padStart(4, "0");
+    }
+    if (item.nivel === "CIRCUNSCRIPCION") {
+      return clean(item.circunscripcion);
+    }
     return structureDisplayName(item);
   });
 }
 
 function syncFilterVisibility() {
   const level = state.selectedLevel;
-  const usesTerritory = level !== "PROVINCIA";
-  const usesRegion = level === "ZONA";
-
-  els.territoryControl.hidden = !usesTerritory;
-  els.regionControl.hidden = !usesRegion;
+  els.territoryControl.hidden = level === "PROVINCIA";
+  els.regionControl.hidden = level !== "ZONA";
 }
 
 function populateTerritories() {
   clearSelect(els.territorySelect);
-
   const options = territoryOptionsForLevel(state.selectedLevel);
 
   if (!options.length) {
@@ -434,8 +422,9 @@ function populateTerritories() {
 
   els.territorySelect.disabled = false;
 
-  const valid = options.some((entry) => entry.value === state.selectedTerritory);
-  if (!valid) state.selectedTerritory = options[0].value;
+  if (!options.some((entry) => entry.value === state.selectedTerritory)) {
+    state.selectedTerritory = options[0].value;
+  }
 
   for (const entry of options) {
     addOption(
@@ -467,8 +456,9 @@ function populateRegions() {
 
   els.regionSelect.disabled = false;
 
-  const valid = options.some((entry) => entry.value === state.selectedRegion);
-  if (!valid) state.selectedRegion = options[0].value;
+  if (!options.some((entry) => entry.value === state.selectedRegion)) {
+    state.selectedRegion = options[0].value;
+  }
 
   for (const entry of options) {
     addOption(
@@ -482,16 +472,15 @@ function populateRegions() {
 
 function populateStructures() {
   clearSelect(els.structureSelect);
-
   let items = candidateStructures();
 
   if (
-    ["CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"].includes(state.selectedLevel)
+    ["CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"]
+      .includes(state.selectedLevel)
   ) {
     const selectedByTerritory = items.find(
       (item) => item.estructura_codigo === state.selectedTerritory
     );
-
     if (selectedByTerritory) items = [selectedByTerritory];
   }
 
@@ -505,11 +494,11 @@ function populateStructures() {
 
   els.structureSelect.disabled = false;
 
-  const valid = items.some(
-    (item) => item.estructura_codigo === state.selectedStructureCode
-  );
-
-  if (!valid) {
+  if (
+    !items.some(
+      (item) => item.estructura_codigo === state.selectedStructureCode
+    )
+  ) {
     state.selectedStructureCode = items[0].estructura_codigo;
   }
 
@@ -528,18 +517,33 @@ function populateStructures() {
     ) || items[0];
 }
 
+function resetDetail() {
+  state.selectedSections = [];
+  state.detailRows = [];
+  state.detailLoadedFor = "";
+  state.detailRequestId += 1;
+
+  els.detailTableBody.innerHTML = "";
+  els.detailCount.textContent = "—";
+  els.detailLoading.hidden = false;
+  els.detailLoading.textContent =
+    state.selectedStructureCode
+      ? "Cargando cargos de la estructura seleccionada…"
+      : "Seleccione una estructura.";
+  els.detailTableScroll.hidden = true;
+  els.detailEmpty.hidden = true;
+  els.detailSearch.value = "";
+  els.detailMissingFilter.value = "TODOS";
+}
+
 function refreshFilters() {
   syncFilterVisibility();
   populateTerritories();
   populateRegions();
   populateStructures();
+  resetDetail();
   renderAll();
-}
-
-function levelSummary(level) {
-  return (
-    state.levelSummaries.find((entry) => entry.nivel === level) || null
-  );
+  void loadSelectedDetail();
 }
 
 function contextualKpiScope() {
@@ -550,31 +554,23 @@ function contextualKpiScope() {
     return state.selectedStructure ? [state.selectedStructure] : items;
   }
 
-  /*
-   * Circunscripción, Municipio y Distrito Municipal se seleccionan
-   * como una estructura concreta en el control Territorio.
-   */
-  if (["CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"].includes(level)) {
+  if (
+    ["CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"].includes(level)
+  ) {
     const selected =
       state.selectedStructure ||
-      items.find((item) => item.estructura_codigo === state.selectedTerritory);
-
+      items.find(
+        (item) => item.estructura_codigo === state.selectedTerritory
+      );
     return selected ? [selected] : items;
   }
 
-  /*
-   * Región: los KPI describen las regiones del territorio seleccionado.
-   */
   if (level === "REGION" && state.selectedTerritory) {
     return items.filter(
       (item) => clean(item.territorio_codigo) === state.selectedTerritory
     );
   }
 
-  /*
-   * Zona: los KPI describen exactamente el conjunto visible.
-   * Ejemplo Quita Sueño + "Sin región formal" => sus 4 zonas.
-   */
   if (level === "ZONA") {
     if (state.selectedTerritory) {
       items = items.filter(
@@ -598,7 +594,6 @@ function averageMetric(items, getter) {
     .filter((value) => Number.isFinite(value));
 
   if (!values.length) return null;
-
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
@@ -608,26 +603,20 @@ function contextualKpiLabels(items) {
 
   if (level === "ZONA") {
     const regionIsFormal =
-      state.selectedRegion !== "" &&
-      state.selectedRegion !== "0";
+      state.selectedRegion !== "" && state.selectedRegion !== "0";
 
     els.kpiGlobalLabel.textContent =
       regionIsFormal ? "Avance de la región" : "Avance del territorio";
-
     els.kpiAverageLabel.textContent = "Promedio de sus zonas";
     els.kpiEmptyLabel.textContent = "Zonas sin información";
 
-    els.kpiGlobalNote.textContent =
-      regionIsFormal
-        ? "Calculado con las zonas de la región seleccionada"
-        : "Calculado con las zonas del territorio seleccionado";
-
+    els.kpiGlobalNote.textContent = regionIsFormal
+      ? "Calculado con las zonas de la región seleccionada"
+      : "Calculado con las zonas del territorio seleccionado";
     els.kpiAverageNote.textContent =
       `${count} zona${count === 1 ? "" : "s"} en el contexto actual`;
-
     els.kpiEmptyNote.textContent =
       "Porcentaje de zonas del contexto sin información";
-
     return;
   }
 
@@ -654,7 +643,6 @@ function contextualKpiLabels(items) {
 
 function renderLevelKpis() {
   const items = contextualKpiScope();
-
   contextualKpiLabels(items);
 
   if (!items.length) {
@@ -665,18 +653,7 @@ function renderLevelKpis() {
     return;
   }
 
-  /*
-   * Dentro de cada nivel territorial SIGEP utilizado en estas
-   * comparaciones, las estructuras del mismo tipo manejan el mismo
-   * denominador operativo (por ejemplo Zona = 45, Región = 21).
-   * Por eso el promedio de sus porcentajes representa correctamente
-   * el contexto visible.
-   */
-  const advance = averageMetric(
-    items,
-    (item) => item.porcentaje_avance
-  );
-
+  const advance = averageMetric(items, (item) => item.porcentaje_avance);
   const quality = averageMetric(
     items,
     (item) => item?.calidad_datos?.porcentaje_datos_completos
@@ -684,43 +661,30 @@ function renderLevelKpis() {
 
   const emptyPercent =
     100 *
-    items.filter(
-      (item) => clampPercent(item.porcentaje_avance) === 0
-    ).length /
+    items.filter((item) => clampPercent(item.porcentaje_avance) === 0).length /
     items.length;
 
-  els.kpiGlobal.textContent =
-    advance == null ? "—" : percent(advance);
-
-  els.kpiAverage.textContent =
-    advance == null ? "—" : percent(advance);
-
-  els.kpiQuality.textContent =
-    quality == null ? "—" : percent(quality);
-
-  els.kpiEmpty.textContent =
-    percent(emptyPercent);
+  els.kpiGlobal.textContent = advance == null ? "—" : percent(advance);
+  els.kpiAverage.textContent = advance == null ? "—" : percent(advance);
+  els.kpiQuality.textContent = quality == null ? "—" : percent(quality);
+  els.kpiEmpty.textContent = percent(emptyPercent);
 }
 
 function messageForStructure(item) {
-  const p = clampPercent(item?.porcentaje_avance);
+  const value = clampPercent(item?.porcentaje_avance);
 
-  if (p === 0) {
+  if (value === 0) {
     return "Esta estructura no tiene información registrada. El desglose inferior permite identificar qué secciones aún están vacías.";
   }
-
-  if (p === 100) {
+  if (value === 100) {
     return "La estructura tiene todas sus posiciones operativas ocupadas. Revisa también la calidad de nombre, cédula y teléfono principal.";
   }
-
-  if (p >= 75) {
+  if (value >= 75) {
     return "La estructura está en una etapa avanzada. Las secciones y los indicadores de calidad muestran dónde concentrar la actualización pendiente.";
   }
-
-  if (p >= 25) {
+  if (value >= 25) {
     return "La estructura está en proceso. Utiliza el desglose por secciones para identificar los bloques con menor cobertura.";
   }
-
   return "La estructura está iniciada y requiere completar una parte importante de sus posiciones operativas.";
 }
 
@@ -737,23 +701,20 @@ function renderSelectedStructure() {
   }
 
   const quality = selectedQuality(item);
-  const p = clampPercent(item.porcentaje_avance);
+  const value = clampPercent(item.porcentaje_avance);
   const status = clean(item.estado) || "SIN INFORMACIÓN REGISTRADA";
 
   els.selectedLevelLabel.textContent = levelLabel(item.nivel);
   els.selectedStructureTitle.textContent = structureDisplayName(item);
   els.selectedStructureMeta.textContent = structureMeta(item);
-
   els.selectedState.textContent = status;
   els.selectedState.className = `state-badge ${stateClass(status)}`;
-
-  els.selectedPercent.textContent = percent(p);
-  els.progressRing.style.setProperty("--progress", `${p * 3.6}deg`);
+  els.selectedPercent.textContent = percent(value);
+  els.progressRing.style.setProperty("--progress", `${value * 3.6}deg`);
   els.progressRing.setAttribute(
     "aria-label",
-    `${structureDisplayName(item)}: ${percent(p)} de avance`
+    `${structureDisplayName(item)}: ${percent(value)} de avance`
   );
-
   els.selectedMessage.textContent = messageForStructure(item);
 
   els.selectedNameQuality.textContent = percent(quality.name);
@@ -777,7 +738,6 @@ function comparisonScope() {
         (item) => clean(item.territorio_codigo) === state.selectedTerritory
       );
     }
-
     if (state.selectedRegion !== "") {
       items = items.filter(
         (item) => normalizeRegion(item.region) === state.selectedRegion
@@ -788,6 +748,19 @@ function comparisonScope() {
   return sortNatural(items, (item) => compactComparisonName(item));
 }
 
+function activateComparisonStructure(code) {
+  if (!code) return;
+
+  state.selectedStructureCode = code;
+  els.structureSelect.value = code;
+  state.selectedStructure =
+    state.structures.find((item) => item.estructura_codigo === code) || null;
+
+  resetDetail();
+  renderAll();
+  void loadSelectedDetail();
+}
+
 function renderComparison() {
   const items = comparisonScope();
 
@@ -796,12 +769,12 @@ function renderComparison() {
       state.selectedRegion === "0" || state.selectedRegion === ""
         ? "zonas del territorio"
         : `zonas de la Región ${state.selectedRegion.padStart(2, "0")}`;
-
     els.comparisonTitle.textContent = `Comparación de ${regionLabel}`;
   } else if (state.selectedLevel === "REGION") {
     els.comparisonTitle.textContent = "Regiones del territorio";
   } else {
-    els.comparisonTitle.textContent = `${levelLabel(state.selectedLevel)} · comparación`;
+    els.comparisonTitle.textContent =
+      `${levelLabel(state.selectedLevel)} · comparación`;
   }
 
   if (!items.length) {
@@ -814,7 +787,7 @@ function renderComparison() {
   }
 
   els.comparisonList.innerHTML = items.map((item) => {
-    const p = clampPercent(item.porcentaje_avance);
+    const value = clampPercent(item.porcentaje_avance);
     const active =
       item.estructura_codigo === state.selectedStructureCode ? " active" : "";
 
@@ -829,35 +802,21 @@ function renderComparison() {
         <span class="comparison-name">
           ${escapeHtml(compactComparisonName(item))}
         </span>
-
         <span class="comparison-track" aria-hidden="true">
-          <span style="width:${p}%"></span>
+          <span style="width:${value}%"></span>
         </span>
-
-        <strong class="comparison-percent">${escapeHtml(percent(p))}</strong>
+        <strong class="comparison-percent">
+          ${escapeHtml(percent(value))}
+        </strong>
       </div>
     `;
   }).join("");
 
   els.comparisonList.querySelectorAll(".comparison-row").forEach((row) => {
-    const activate = () => {
-      const code = row.dataset.structureCode;
-      if (!code) return;
-
-      state.selectedStructureCode = code;
-      els.structureSelect.value = code;
-
-      state.selectedStructure =
-        state.structures.find(
-          (item) => item.estructura_codigo === code
-        ) || null;
-
-      resetDetail();
-      renderAll({ skipComparison: false });
-    };
+    const activate = () =>
+      activateComparisonStructure(row.dataset.structureCode);
 
     row.addEventListener("click", activate);
-
     row.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -868,8 +827,26 @@ function renderComparison() {
 }
 
 function renderSections() {
-  const item = state.selectedStructure;
-  const sections = Array.isArray(item?.secciones) ? item.secciones : [];
+  const sections = state.selectedSections;
+
+  if (!state.selectedStructureCode) {
+    els.sectionCards.innerHTML = `
+      <article class="empty-placeholder branded-panel">
+        Seleccione una estructura.
+      </article>
+    `;
+    return;
+  }
+
+  if (state.detailLoadedFor !== state.selectedStructureCode) {
+    els.sectionCards.innerHTML = `
+      <article class="empty-placeholder branded-panel">
+        <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
+        Cargando secciones…
+      </article>
+    `;
+    return;
+  }
 
   if (!sections.length) {
     els.sectionCards.innerHTML = `
@@ -882,7 +859,7 @@ function renderSections() {
   }
 
   els.sectionCards.innerHTML = sections.map((section) => {
-    const p = clampPercent(section.porcentaje_avance);
+    const value = clampPercent(section.porcentaje_avance);
     const status = clean(section.estado) || "SIN INFORMACIÓN REGISTRADA";
     const subsections = Array.isArray(section.subsecciones)
       ? section.subsecciones
@@ -904,25 +881,16 @@ function renderSections() {
     return `
       <article class="section-card branded-panel">
         <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-
         <div class="section-card-top">
           <h3 class="section-card-title">
             ${escapeHtml(section.titulo || "Sección")}
           </h3>
-
-          <strong class="section-percent">
-            ${escapeHtml(percent(p))}
-          </strong>
+          <strong class="section-percent">${escapeHtml(percent(value))}</strong>
         </div>
-
         <div class="bar-track" aria-hidden="true">
-          <span style="width:${p}%"></span>
+          <span style="width:${value}%"></span>
         </div>
-
-        <span class="section-card-state">
-          ${escapeHtml(status)}
-        </span>
-
+        <span class="section-card-state">${escapeHtml(status)}</span>
         ${subsectionMarkup}
       </article>
     `;
@@ -934,17 +902,17 @@ function setBar(element, value) {
 }
 
 function renderQuality() {
-  const q = selectedQuality(state.selectedStructure);
+  const quality = selectedQuality(state.selectedStructure);
 
-  els.qualityNameValue.textContent = percent(q.name);
-  els.qualityCedulaValue.textContent = percent(q.cedula);
-  els.qualityPhoneValue.textContent = percent(q.phone);
-  els.qualityCompleteValue.textContent = percent(q.complete);
+  els.qualityNameValue.textContent = percent(quality.name);
+  els.qualityCedulaValue.textContent = percent(quality.cedula);
+  els.qualityPhoneValue.textContent = percent(quality.phone);
+  els.qualityCompleteValue.textContent = percent(quality.complete);
 
-  setBar(els.qualityNameBar, q.name);
-  setBar(els.qualityCedulaBar, q.cedula);
-  setBar(els.qualityPhoneBar, q.phone);
-  setBar(els.qualityCompleteBar, q.complete);
+  setBar(els.qualityNameBar, quality.name);
+  setBar(els.qualityCedulaBar, quality.cedula);
+  setBar(els.qualityPhoneBar, quality.phone);
+  setBar(els.qualityCompleteBar, quality.complete);
 }
 
 function renderActivePath() {
@@ -955,20 +923,24 @@ function renderActivePath() {
     return;
   }
 
-  const chips = [
-    "San Cristóbal",
-    levelLabel(item.nivel)
-  ];
+  const chips = ["San Cristóbal", levelLabel(item.nivel)];
 
   if (clean(item.circunscripcion)) {
     chips.push(`Circ. ${clean(item.circunscripcion)}`);
   }
 
-  if (["MUNICIPIO", "DISTRITO MUNICIPAL", "REGION", "ZONA"].includes(item.nivel)) {
+  if (
+    ["MUNICIPIO", "DISTRITO MUNICIPAL", "REGION", "ZONA"]
+      .includes(item.nivel)
+  ) {
     chips.push(territoryLabel(item));
   }
 
-  if (item.nivel === "ZONA" && normalizeRegion(item.region) !== "0" && clean(item.region)) {
+  if (
+    item.nivel === "ZONA" &&
+    normalizeRegion(item.region) !== "0" &&
+    clean(item.region)
+  ) {
     chips.push(`Región ${normalizeRegion(item.region).padStart(2, "0")}`);
   }
 
@@ -983,178 +955,129 @@ function renderActivePath() {
   ).join("");
 }
 
-function resetDetail() {
-  state.detailRows = [];
-  state.detailLoadedFor = "";
-  els.detailWorkspace.hidden = true;
-  els.detailTableBody.innerHTML = "";
-  els.detailSearch.value = "";
-  els.detailStatusFilter.value = "TODOS";
-  els.detailMissingFilter.value = "TODOS";
+function rowMissingFields(row) {
+  return Array.isArray(row?.campos_faltantes)
+    ? row.campos_faltantes.filter((field) =>
+        ["nombre", "cedula", "telefono_principal"].includes(field)
+      )
+    : [];
 }
 
-function renderSession() {
-  const active = Boolean(state.session?.access_token);
+function safeDetailRows(cargos) {
+  if (!Array.isArray(cargos)) return [];
 
-  els.sessionChip.classList.remove("active", "error");
+  return cargos
+    .map((row) => {
+      const missing = rowMissingFields(row);
 
-  if (active) {
-    els.sessionChip.classList.add("active");
-    els.sessionChip.innerHTML = `
-      <span class="session-dot"></span>
-      <span>Sesión activa</span>
-    `;
-
-    els.detailAccessTitle.textContent = "Detalle operativo disponible";
-    els.loadDetailButton.hidden = false;
-    els.loginLink.hidden = true;
-  } else {
-    els.sessionChip.innerHTML = `
-      <span class="session-dot"></span>
-      <span>Sin sesión</span>
-    `;
-
-    els.detailAccessTitle.textContent = "Detalle protegido";
-    els.loadDetailButton.hidden = true;
-    els.loginLink.hidden = false;
-  }
-}
-
-function missingLabel(value) {
-  const labels = {
-    nombre: "Nombre",
-    cedula: "Cédula",
-    telefono_principal: "Teléfono"
-  };
-
-  return labels[value] || value;
-}
-
-
-/*
- * Mantiene en el detalle del Dashboard la misma etiqueta visual
- * utilizada por las fichas del Portal Territorial.
- *
- * IMPORTANTE:
- * En las Zonas, las 31 posiciones de Z_MIEMBROS conservan físicamente
- * sus cargos/códigos históricos en base de datos, pero visualmente
- * corresponden a "Miembro". El Dashboard no debe mostrar el cargo
- * físico preservado en esa sección.
- */
-function detailDisplayCargo(row) {
-  const sectionCode = clean(row?.seccion_codigo).toUpperCase();
-
-  if (
-    state.selectedStructure?.nivel === "ZONA" &&
-    sectionCode === "Z_MIEMBROS"
-  ) {
-    return "Miembro";
-  }
-
-  return clean(row?.cargo) || "—";
+      // Defensa de privacidad: solo se conservan estas propiedades.
+      return {
+        numero_ficha: Number.isFinite(Number(row?.orden))
+          ? Number(row.orden)
+          : null,
+        cargo: clean(row?.cargo) || "—",
+        seccion_codigo: clean(row?.seccion_codigo),
+        campos_faltantes: missing,
+        nombre: missing.includes("nombre") ? "VACÍO" : "COMPLETO",
+        cedula: missing.includes("cedula") ? "VACÍO" : "COMPLETO",
+        telefono: missing.includes("telefono_principal")
+          ? "VACÍO"
+          : "COMPLETO"
+      };
+    })
+    .filter((row) => row.campos_faltantes.length > 0);
 }
 
 function detailRowsFiltered() {
   const query = normalizeText(els.detailSearch.value);
-  const status = els.detailStatusFilter.value;
   const missing = els.detailMissingFilter.value;
 
   return state.detailRows.filter((row) => {
-    if (status !== "TODOS" && clean(row.estado_ficha) !== status) {
+    if (
+      missing !== "TODOS" &&
+      !row.campos_faltantes.includes(missing)
+    ) {
       return false;
     }
 
-    const missingFields = Array.isArray(row.campos_faltantes)
-      ? row.campos_faltantes
-      : [];
-
-    if (missing !== "TODOS" && !missingFields.includes(missing)) {
+    if (query && !normalizeText(row.cargo).includes(query)) {
       return false;
-    }
-
-    if (query) {
-      const haystack = normalizeText([
-        detailDisplayCargo(row),
-        row.estado_ficha,
-        row.origen,
-        missingFields.join(" ")
-      ].join(" "));
-
-      if (!haystack.includes(query)) return false;
     }
 
     return true;
   });
 }
 
+function statusMarkup(value) {
+  const status = value === "COMPLETO" ? "COMPLETO" : "VACÍO";
+  return `
+    <span class="field-status" data-status="${status}">
+      ${escapeHtml(status)}
+    </span>
+  `;
+}
+
 function renderDetailTable() {
   const rows = detailRowsFiltered();
 
-  els.detailEmpty.hidden = rows.length > 0;
-  els.detailTableBody.innerHTML = rows.map((row) => {
-    const missing = Array.isArray(row.campos_faltantes)
-      ? row.campos_faltantes
-      : [];
+  els.detailCount.textContent = String(state.detailRows.length);
 
-    const missingMarkup = missing.length
-      ? `
-        <div class="missing-tags">
-          ${missing.map((field) => `
-            <span class="missing-tag">
-              ${escapeHtml(missingLabel(field))}
-            </span>
-          `).join("")}
-        </div>
-      `
-      : `<span class="complete-mark">Completo</span>`;
+  if (state.detailLoadedFor !== state.selectedStructureCode) {
+    els.detailLoading.hidden = false;
+    els.detailTableScroll.hidden = true;
+    els.detailEmpty.hidden = true;
+    return;
+  }
 
-    const status = clean(row.estado_ficha) || "INCOMPLETA";
+  els.detailLoading.hidden = true;
+  els.detailTableScroll.hidden = rows.length === 0;
+  els.detailEmpty.hidden = rows.length !== 0;
 
-    return `
-      <tr>
-        <td>
-          ${escapeHtml(detailDisplayCargo(row))}
-          ${clean(row.origen) ? `
-            <div class="muted-origin">${escapeHtml(row.origen)}</div>
-          ` : ""}
-        </td>
-
-        <td>
-          <span class="row-status ${escapeHtml(status)}">
-            ${escapeHtml(status)}
-          </span>
-        </td>
-
-        <td>${missingMarkup}</td>
-      </tr>
-    `;
-  }).join("");
+  els.detailTableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td data-label="# ficha" class="detail-number">
+        ${escapeHtml(row.numero_ficha ?? "—")}
+      </td>
+      <td data-label="Cargo" class="detail-cargo">
+        ${escapeHtml(row.cargo)}
+      </td>
+      <td data-label="Nombre">${statusMarkup(row.nombre)}</td>
+      <td data-label="Cédula">${statusMarkup(row.cedula)}</td>
+      <td data-label="Teléfono">${statusMarkup(row.telefono)}</td>
+    </tr>
+  `).join("");
 }
 
-async function loadDetail() {
+async function loadSelectedDetail() {
   const structureCode = state.selectedStructureCode;
 
   if (!structureCode) {
-    toast("Selecciona una estructura primero.", "error");
+    resetDetail();
+    renderSections();
+    renderDetailTable();
     return;
   }
 
-  if (!state.session?.access_token) {
-    toast("Necesitas una sesión activa para cargar el detalle.", "error");
-    return;
-  }
+  const requestId = ++state.detailRequestId;
+  state.selectedSections = [];
+  state.detailRows = [];
+  state.detailLoadedFor = "";
 
-  els.loadDetailButton.disabled = true;
-  els.loadDetailButton.textContent = "Cargando…";
+  els.detailLoading.hidden = false;
+  els.detailLoading.textContent =
+    "Cargando cargos de la estructura seleccionada…";
+  els.detailTableScroll.hidden = true;
+  els.detailEmpty.hidden = true;
+  els.detailCount.textContent = "—";
+  renderSections();
 
   try {
     const { data, error } = await supabase.rpc(
       DETAIL_RPC,
-      {
-        p_estructura_codigo: structureCode
-      }
+      { p_estructura_codigo: structureCode }
     );
 
+    if (requestId !== state.detailRequestId) return;
     if (error) throw error;
 
     const payload = parseJson(data);
@@ -1162,95 +1085,86 @@ async function loadDetail() {
     if (!payload || payload.ok !== true) {
       throw new Error(
         payload?.mensaje ||
-        "No fue posible consultar el detalle de esta estructura."
+        "La RPC pública de detalle no devolvió un resultado válido."
       );
     }
 
-    state.detailRows = Array.isArray(payload.registros)
-      ? payload.registros
+    if (
+      payload.solo_lectura !== true ||
+      payload.contiene_datos_personales !== false
+    ) {
+      throw new Error(
+        "El detalle no confirmó el contrato de privacidad y solo lectura."
+      );
+    }
+
+    state.selectedSections = Array.isArray(payload.secciones)
+      ? payload.secciones
       : [];
 
+    state.detailRows = safeDetailRows(payload.cargos);
     state.detailLoadedFor = structureCode;
 
-    els.detailWorkspace.hidden = false;
+    renderSections();
     renderDetailTable();
-
-    els.detailWorkspace.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
-
-    toast("Detalle operativo cargado en modo solo lectura.");
   } catch (error) {
-    console.error("SIGEP Dashboard detail error:", error);
+    if (requestId !== state.detailRequestId) return;
+
+    console.error("SIGEP Dashboard public detail error:", error);
+
+    state.selectedSections = [];
+    state.detailRows = [];
+    state.detailLoadedFor = structureCode;
+
+    els.detailLoading.hidden = false;
+    els.detailLoading.textContent =
+      "No fue posible cargar el detalle de esta estructura.";
+    els.detailTableScroll.hidden = true;
+    els.detailEmpty.hidden = true;
+    els.detailCount.textContent = "—";
+
+    renderSections();
 
     toast(
       error?.message ||
-      "No fue posible cargar el detalle operativo.",
+      "No fue posible cargar el detalle público.",
       "error"
     );
-  } finally {
-    els.loadDetailButton.disabled = false;
-    els.loadDetailButton.textContent = "Cargar detalle operativo";
   }
 }
 
-function renderAll(options = {}) {
+function renderAll() {
   renderLevelKpis();
   renderSelectedStructure();
-
-  if (!options.skipComparison) {
-    renderComparison();
-  }
-
+  renderComparison();
   renderSections();
   renderQuality();
   renderActivePath();
-
-  if (
-    state.detailLoadedFor &&
-    state.detailLoadedFor !== state.selectedStructureCode
-  ) {
-    resetDetail();
-  }
-}
-
-async function refreshSession() {
-  try {
-    const { data, error } = await supabase.auth.getSession();
-
-    if (error) throw error;
-
-    state.session = data.session || null;
-  } catch (error) {
-    console.error("SIGEP Dashboard session error:", error);
-    state.session = null;
-    els.sessionChip.classList.add("error");
-  }
-
-  renderSession();
+  renderDetailTable();
 }
 
 async function loadPublicDashboard() {
   if (!configReady) {
     setStatus("error", "Configuración Supabase incompleta");
-    throw new Error(
-      "La configuración de Supabase no está disponible."
-    );
+    throw new Error("La configuración de Supabase no está disponible.");
   }
 
   setStatus("", "Cargando datos SIGEP…");
 
   const { data, error } = await supabase.rpc(PUBLIC_RPC);
-
   if (error) throw error;
 
   const payload = parseJson(data);
 
-  if (!payload || payload.ok !== true) {
+  if (
+    !payload ||
+    payload.ok !== true ||
+    payload.solo_lectura !== true ||
+    payload.contiene_datos_personales !== false
+  ) {
     throw new Error(
       payload?.mensaje ||
-      "La RPC pública del dashboard no devolvió un resultado válido."
+      "La RPC pública del dashboard no devolvió un resultado válido y seguro."
     );
   }
 
@@ -1270,15 +1184,24 @@ async function loadPublicDashboard() {
   state.structures = structures;
   state.levelSummaries = summaries;
 
-  setStatus(
-    "ready",
-    "Datos SIGEP disponibles · solo lectura"
-  );
+  setStatus("ready", "Datos SIGEP disponibles · solo lectura");
 
   state.selectedLevel = "PROVINCIA";
   els.levelSelect.value = state.selectedLevel;
 
   refreshFilters();
+}
+
+function selectCurrentStructureAndLoad() {
+  state.selectedStructureCode = els.structureSelect.value;
+  state.selectedStructure =
+    state.structures.find(
+      (item) => item.estructura_codigo === state.selectedStructureCode
+    ) || null;
+
+  resetDetail();
+  renderAll();
+  void loadSelectedDetail();
 }
 
 function bindEvents() {
@@ -1288,7 +1211,6 @@ function bindEvents() {
     state.selectedRegion = "";
     state.selectedStructureCode = "";
     state.selectedStructure = null;
-    resetDetail();
     refreshFilters();
   });
 
@@ -1297,32 +1219,29 @@ function bindEvents() {
     state.selectedRegion = "";
     state.selectedStructureCode = "";
     state.selectedStructure = null;
-    resetDetail();
+
     populateRegions();
     populateStructures();
+    resetDetail();
     renderAll();
+    void loadSelectedDetail();
   });
 
   els.regionSelect.addEventListener("change", () => {
     state.selectedRegion = els.regionSelect.value;
     state.selectedStructureCode = "";
     state.selectedStructure = null;
-    resetDetail();
+
     populateStructures();
-    renderAll();
-  });
-
-  els.structureSelect.addEventListener("change", () => {
-    state.selectedStructureCode = els.structureSelect.value;
-    state.selectedStructure =
-      state.structures.find(
-        (item) =>
-          item.estructura_codigo === state.selectedStructureCode
-      ) || null;
-
     resetDetail();
     renderAll();
+    void loadSelectedDetail();
   });
+
+  els.structureSelect.addEventListener(
+    "change",
+    selectCurrentStructureAndLoad
+  );
 
   els.resetFiltersButton.addEventListener("click", () => {
     state.selectedLevel = "PROVINCIA";
@@ -1330,37 +1249,19 @@ function bindEvents() {
     state.selectedRegion = "";
     state.selectedStructureCode = "";
     state.selectedStructure = null;
-
     els.levelSelect.value = state.selectedLevel;
-
-    resetDetail();
     refreshFilters();
   });
 
-  els.loadDetailButton.addEventListener("click", loadDetail);
-
   els.detailSearch.addEventListener("input", renderDetailTable);
-  els.detailStatusFilter.addEventListener("change", renderDetailTable);
   els.detailMissingFilter.addEventListener("change", renderDetailTable);
-
-  supabase.auth.onAuthStateChange((_event, session) => {
-    state.session = session || null;
-    renderSession();
-
-    if (!session) {
-      resetDetail();
-    }
-  });
 }
 
 async function init() {
   bindEvents();
 
   try {
-    await Promise.all([
-      refreshSession(),
-      loadPublicDashboard()
-    ]);
+    await loadPublicDashboard();
   } catch (error) {
     console.error("SIGEP Dashboard init error:", error);
 
@@ -1375,6 +1276,10 @@ async function init() {
       "Verifica la publicación del backend y la configuración de Supabase.";
     els.selectedMessage.textContent =
       error?.message || "Error de carga.";
+
+    els.detailLoading.hidden = false;
+    els.detailLoading.textContent =
+      "El detalle no está disponible hasta que cargue el backend público.";
   }
 }
 
