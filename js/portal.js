@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: ZONAS_45_DIRECCION_MIEMBROS_V1_6
+// SIGEP PRM SC — PORTAL BUILD: ZONAS45_REP_ELECTIVA_COMPARTIDA_V1_7
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "ZONAS_45_DIRECCION_MIEMBROS_V1_6";
+window.__SIGEP_PORTAL_BUILD__ = "ZONAS45_REP_ELECTIVA_COMPARTIDA_V1_7";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -55,7 +55,7 @@ const PROVINCIAL_SECTIONS = [
   { code: "C_CLED_PROVINCIAL", letter: "C", title: "Comisión Local de Ética y Disciplina Provincial", subtitle: "Comisión Local de Ética y Disciplina", reference: "Artículo 60" },
   { code: "D_CARGOS_FUNCIONALES", letter: "D", title: "Cargos Funcionales Provinciales", subtitle: "Actas, correspondencia y fiscalía disciplinaria", reference: "Artículos 61 y 176" },
   { code: "E_COMISION_EJECUTIVA", letter: "E", title: "Comisión Ejecutiva Provincial", subtitle: "Comisión Ejecutiva del organismo territorial", reference: "Artículos 95, 96 y 97" },
-  { code: "F_REPRESENTACION_SENATORIAL", letter: "F", title: "Representación Senatorial", subtitle: "Cuando el partido tenga un senador en la provincia", reference: "Sección institucional SIGEP" },
+  { code: "F_REPRESENTACION_SENATORIAL", letter: "F", title: "Representación Electiva Provincial", subtitle: "Senador, Diputados, Alcaldes Municipales y Directores de Distrito Municipal", reference: "Representación electiva provincial" },
   { code: "G_MIEMBRO_NO_ESTATUTARIO", letter: "G", title: "Miembros — No Estatutaria", subtitle: "Preservación de fichas históricas y cargos no clasificados", reference: "Sección de preservación de datos" }
 ];
 
@@ -68,11 +68,24 @@ const PROVINCIAL_CONFORMATIONS = [
   { value: "COMITE_PROVINCIAL", label: "Comité Provincial — artículo 104" },
   { value: "COMISION_EJECUTIVA", label: "Comisión Ejecutiva Provincial — artículos 95 y 96" },
   { value: "CLED_PROVINCIAL", label: "CLED Provincial — artículo 60" },
+  { value: "REPRESENTACION_ELECTIVA", label: "Representación Electiva Provincial" },
   { value: "NO_ESTATUTARIOS", label: "Miembros no estatutarios" }
 ];
 
 const PROVINCIAL_EDITABLE_FIELDS = [
   ["comentario", "Comentario", "textarea"]
+];
+
+const PROVINCIAL_ELECTIVE_DEPUTY_FIELDS = [
+  ["comentario", "Comentario", "textarea"],
+  ["periodo_electoral", "Periodo electoral", "text"]
+];
+
+const PROVINCIAL_ELECTIVE_GROUPS = [
+  { code: "SENADOR", title: "Senador", subtitle: "1 posición", expected: 1 },
+  { code: "DIPUTADOS", title: "Diputados(as)", subtitle: "10 posiciones · Circunscripción 1: 4 · Circunscripción 2: 3 · Circunscripción 3: 3", expected: 10 },
+  { code: "ALCALDES", title: "Alcaldes Municipales", subtitle: "8 posiciones", expected: 8 },
+  { code: "DIRECTORES", title: "Directores(as) de Distrito Municipal", subtitle: "9 posiciones", expected: 9 }
 ];
 
 const CIRCUNSCRIPTION_SECTIONS = [
@@ -659,7 +672,10 @@ function getRecordIdentityInputs() {
 async function resolveRecordNameByCedula({ silent = false, force = false } = {}) {
   if (!state.selectedRecord || !canEditRecord(state.selectedRecord)) return null;
 
-  if (isCircunscriptionStructure() && state.selectedRecord?.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION") return null;
+  if (
+    isCircunscriptionStructure() &&
+    state.selectedRecord?.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION"
+  ) return null;
 
   const { cedulaInput, nombreInput } = getRecordIdentityInputs();
   if (!cedulaInput || !nombreInput) return null;
@@ -695,8 +711,14 @@ async function resolveRecordNameByCedula({ silent = false, force = false } = {})
   nombreInput.placeholder = "Consultando nombre oficial…";
 
   try {
+    const identityRpc =
+      isProvincialStructure() &&
+      state.selectedRecord?.es_relacion_electiva === true
+        ? "sigep_portal_buscar_nombre_representacion_electiva_provincia"
+        : "sigep_portal_buscar_nombre_por_cedula";
+
     const { data, error } = await supabase.rpc(
-      "sigep_portal_buscar_nombre_por_cedula",
+      identityRpc,
       {
         p_id_registro: state.selectedRecord.id_registro,
         p_cedula: digits
@@ -880,8 +902,13 @@ function provincialDiagnostic(records) {
   const result = {
     build: window.__SIGEP_PORTAL_BUILD__,
     total: (records || []).length,
-    fichasProvinciales: (records || []).filter((r) => !r.es_relacion_ex_oficio && !r.es_ficha_adicional).length,
+    fichasProvinciales: (records || []).filter((r) =>
+      !r.es_relacion_ex_oficio &&
+      !r.es_ficha_adicional &&
+      r.es_relacion_electiva !== true
+    ).length,
     relacionesExOficio: (records || []).filter((r) => r.es_relacion_ex_oficio === true).length,
+    relacionesElectivas: (records || []).filter((r) => r.es_relacion_electiva === true).length,
     fichasAdicionales: (records || []).filter((r) => r.es_ficha_adicional === true).length,
     ocupadas: (records || []).filter((r) => r.nombre_completo).length,
     porSeccion: bySection
@@ -1009,13 +1036,24 @@ async function loadCircunscriptionRecords(structureCode) {
 
 function editableFieldsForSelectedStructure(record = state.selectedRecord) {
   const fields = [...EDITABLE_FIELDS];
-  if (isProvincialStructure()) fields.push(...PROVINCIAL_EDITABLE_FIELDS);
+
+  if (isProvincialStructure()) {
+    if (record?.es_relacion_electiva === true) {
+      if (record?.tipo_relacion_electiva === "DIPUTADO_CIRCUNSCRIPCION") {
+        fields.push(...PROVINCIAL_ELECTIVE_DEPUTY_FIELDS);
+      }
+    } else {
+      fields.push(...PROVINCIAL_EDITABLE_FIELDS);
+    }
+  }
+
   if (isCircunscriptionStructure()) {
     fields.push(...CIRCUNSCRIPTION_EDITABLE_FIELDS);
     if (record?.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION") {
       fields.push(...CIRCUNSCRIPTION_DEPUTY_FIELDS);
     }
   }
+
   return fields;
 }
 
@@ -1038,6 +1076,8 @@ function matchesProvincialConformation(record, conformation) {
       return record.integra_comision_ejecutiva === true;
     case "CLED_PROVINCIAL":
       return record.integra_cled === true;
+    case "REPRESENTACION_ELECTIVA":
+      return record.seccion_codigo === "F_REPRESENTACION_SENATORIAL";
     case "NO_ESTATUTARIOS":
       return record.seccion_codigo === "G_MIEMBRO_NO_ESTATUTARIO";
     default:
@@ -1190,10 +1230,29 @@ function canEditSelectedTerritory() {
 
 function canEditRecord(record = state.selectedRecord) {
   if (!record) return false;
+
   if (isCircunscriptionStructure()) {
-    return canEditSelectedTerritory() && record.editable === true && record.es_relacion_automatica !== true;
+    return (
+      canEditSelectedTerritory() &&
+      record.editable === true &&
+      record.es_relacion_automatica !== true
+    );
   }
-  if (isProvincialStructure() && record.es_relacion_ex_oficio === true) return false;
+
+  if (isProvincialStructure()) {
+    if (record.es_relacion_ex_oficio === true) return false;
+
+    if (record.es_relacion_electiva === true) {
+      return (
+        canEditSelectedTerritory() &&
+        record.editable === true &&
+        record.cupo_habilitado !== false
+      );
+    }
+
+    return canEditSelectedTerritory() && record.editable !== false;
+  }
+
   return canEditSelectedTerritory();
 }
 
@@ -1529,9 +1588,9 @@ async function selectStructure(structureCode) {
   }
 
   state.records = data;
-  if (isProvincialStructure(structure) && state.records.length !== 91) {
+  if (isProvincialStructure(structure) && state.records.length !== 118) {
     console.warn(
-      `SIGEP Provincia: se esperaban 91 elementos vigentes y llegaron ${state.records.length}.`,
+      `SIGEP Provincia: se esperaban 118 elementos vigentes y llegaron ${state.records.length}.`,
       window.__SIGEP_PROVINCIA_DIAGNOSTICO__
     );
   }
@@ -1629,12 +1688,212 @@ function renderReadOnlyAuthorityCard(record, zone, label, visualNumber) {
   `;
 }
 
+
+function provincialElectiveGroupCode(record) {
+  if (
+    record?.cargo_codigo === "SIGEP_PROV_SENADOR_01" ||
+    record?.tipo_relacion_electiva === "SENADOR_PROVINCIA"
+  ) return "SENADOR";
+
+  if (record?.tipo_relacion_electiva === "DIPUTADO_CIRCUNSCRIPCION") {
+    return "DIPUTADOS";
+  }
+
+  if (record?.tipo_relacion_electiva === "ALCALDE_MUNICIPAL") {
+    return "ALCALDES";
+  }
+
+  if (record?.tipo_relacion_electiva === "DIRECTOR_DISTRITAL") {
+    return "DIRECTORES";
+  }
+
+  return "OTROS";
+}
+
+function provincialElectiveOrigin(record) {
+  return [
+    record?.origen_nivel_estructura,
+    record?.origen_estructura_nombre || record?.origen_territorio_codigo
+  ].filter(Boolean).join(" · ");
+}
+
+function renderProvincialRecordCard(record) {
+  const complete = Boolean(record.nombre_completo && record.cedula);
+  const isExOfficio = record.es_relacion_ex_oficio === true;
+  const isElective = record.es_relacion_electiva === true;
+  const isDisabledDeputy =
+    record.tipo_relacion_electiva === "DIPUTADO_CIRCUNSCRIPCION" &&
+    record.cupo_habilitado === false;
+  const editable = canEditRecord(record);
+
+  const origin = isExOfficio || isElective
+    ? provincialElectiveOrigin(record)
+    : "";
+
+  const comment = record.comentario
+    ? `<p class="record-comment"><strong>Comentario:</strong> ${escapeHtml(record.comentario)}</p>`
+    : "";
+
+  let badge = "";
+  if (isExOfficio) {
+    badge = '<span class="relation-badge">Relación ex oficio</span>';
+  } else if (isElective) {
+    badge = '<span class="relation-badge">Representación electiva</span>';
+  } else if (record.es_ficha_adicional === true) {
+    badge = '<span class="relation-badge">Ficha adicional</span>';
+  }
+
+  let note = "";
+  if (isExOfficio) {
+    note = `Ficha vinculada automáticamente${origin ? ` desde ${escapeHtml(origin)}` : ""}. No se duplica ni se edita desde Provincia.`;
+  } else if (isDisabledDeputy) {
+    note = "Cupo de Diputado configurado pero no habilitado. Puede consultarse desde Provincia; la habilitación del cupo conserva su control administrativo vigente.";
+  } else if (isElective) {
+    note = `Ficha vinculada · actualización compartida${origin ? ` · Origen: ${escapeHtml(origin)}` : ""}. Los cambios se escriben en la misma ficha física y se reflejan en ambos niveles.`;
+  }
+
+  let action = "";
+  if (isExOfficio) {
+    action = `<div class="readonly-note">${note}</div>`;
+  } else {
+    let label = editable ? "Abrir y editar ficha" : "Consultar ficha";
+
+    if (record.es_ficha_adicional === true && !record.nombre_completo) {
+      label = editable ? "Agregar senador" : "Consultar ficha";
+    }
+
+    if (
+      isElective &&
+      record.tipo_relacion_electiva === "DIPUTADO_CIRCUNSCRIPCION" &&
+      !record.nombre_completo &&
+      !isDisabledDeputy
+    ) {
+      label = editable ? "Completar diputado" : "Consultar ficha";
+    }
+
+    action = `
+      ${note ? `<div class="readonly-note">${note}</div>` : ""}
+      <button
+        class="button ${editable ? "" : "ghost"} small open-record"
+        type="button"
+        data-record-id="${escapeHtml(record.id_registro)}">
+        ${label}
+      </button>
+    `;
+  }
+
+  return `
+    <article class="record-card provincial-record-card ${(isExOfficio || isElective) ? "linked-record" : ""}">
+      <div class="record-card-top">
+        <span class="cargo-number">${String(record.orden_en_seccion || record.orden_cargo || "").padStart(2, "0")}</span>
+        <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
+      </div>
+      ${badge}
+      <h4>${escapeHtml(record.cargo)}</h4>
+      <div class="record-person ${record.nombre_completo ? "" : "empty"}">
+        <strong>${escapeHtml(record.nombre_completo || (isDisabledDeputy ? "Cupo no habilitado" : "Pendiente de completar"))}</strong>
+        <span>${escapeHtml(record.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
+      </div>
+      ${comment}
+      ${action}
+    </article>
+  `;
+}
+
+function renderProvincialElectiveSectionCards(sectionRecords) {
+  const grouped = new Map();
+
+  for (const record of sectionRecords) {
+    const code = provincialElectiveGroupCode(record);
+    if (!grouped.has(code)) grouped.set(code, []);
+    grouped.get(code).push(record);
+  }
+
+  return PROVINCIAL_ELECTIVE_GROUPS.map((group) => {
+    const groupRecords = (grouped.get(group.code) || [])
+      .sort((a, b) =>
+        Number(a.orden_en_seccion || a.orden_cargo || 0) -
+        Number(b.orden_en_seccion || b.orden_cargo || 0)
+      );
+
+    return `
+      <div class="regional-section-heading full-span">
+        <div>
+          <span class="regional-section-kicker">Sección F · Representación electiva</span>
+          <h3>${escapeHtml(group.title)}</h3>
+          <p>${escapeHtml(group.subtitle)}</p>
+        </div>
+        <span class="regional-section-badge">
+          ${groupRecords.length} de ${group.expected}
+        </span>
+      </div>
+      ${groupRecords.map(renderProvincialRecordCard).join("")}
+    `;
+  }).join("");
+}
+
+function renderProvincialElectiveSummaryRows(sectionRecords) {
+  const grouped = new Map();
+
+  for (const record of sectionRecords) {
+    const code = provincialElectiveGroupCode(record);
+    if (!grouped.has(code)) grouped.set(code, []);
+    grouped.get(code).push(record);
+  }
+
+  return PROVINCIAL_ELECTIVE_GROUPS.map((group) => {
+    const groupRecords = (grouped.get(group.code) || [])
+      .sort((a, b) =>
+        Number(a.orden_en_seccion || a.orden_cargo || 0) -
+        Number(b.orden_en_seccion || b.orden_cargo || 0)
+      );
+
+    const heading = `
+      <tr class="summary-section-row">
+        <td colspan="4">
+          <strong>${escapeHtml(group.title)}</strong>
+          <span>${groupRecords.length} de ${group.expected} posiciones</span>
+        </td>
+      </tr>
+    `;
+
+    const rows = groupRecords.map((record) => {
+      const origin = provincialElectiveOrigin(record);
+      const disabled = record.cupo_habilitado === false;
+      const detail = [
+        disabled ? "Cupo no habilitado" : "",
+        record.es_relacion_electiva === true ? "Ficha vinculada · actualización compartida" : "",
+        origin,
+        record.periodo_electoral ? `Periodo ${record.periodo_electoral}` : ""
+      ].filter(Boolean).join(" · ");
+
+      return `
+        <tr class="${record.es_relacion_electiva === true ? "zonal-summary-row" : ""}">
+          <td>${escapeHtml(record.orden_en_seccion || record.orden_cargo || "")}</td>
+          <td>
+            <strong>${escapeHtml(record.cargo)}</strong>
+            ${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}
+          </td>
+          <td>${escapeHtml(record.nombre_completo || "")}</td>
+          <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
+        </tr>
+      `;
+    }).join("");
+
+    return heading + rows;
+  }).join("");
+}
+
 function renderProvincialRecordCards() {
   const records = filteredRecords();
   const totalVisible = provincialFilteredRecords().length;
   const searchActive = Boolean(els.recordSearch.value.trim());
+  const canEditProvince = canEditSelectedTerritory();
 
-  els.cargoToolbarText.textContent = `${records.length} de ${totalVisible} fichas o relaciones mostradas · ${canEditSelectedTerritory() ? "Edición permitida en fichas provinciales" : "Solo lectura"}. Los miembros ex oficio se vinculan desde su territorio y no se duplican.`;
+  els.cargoToolbarText.textContent =
+    `${records.length} de ${totalVisible} fichas o relaciones mostradas · ` +
+    `${canEditProvince ? "Edición provincial habilitada según ficha y permisos" : "Solo lectura"}. ` +
+    "La Sección F comparte la misma ficha física con Circunscripción, Municipio o Distrito Municipal; no duplica datos.";
 
   const grouped = new Map();
   for (const record of records) {
@@ -1644,45 +1903,19 @@ function renderProvincialRecordCards() {
 
   const currentFilters = provincialFilterState();
   const selectedSections = currentFilters.sections;
+
   const html = PROVINCIAL_SECTIONS
     .filter((section) => selectedSections.has(section.code))
     .map((section) => {
       const sectionRecords = grouped.get(section.code) || [];
-      const showEmptyFutureSection = currentFilters.conformation === "ESTRUCTURA_COMPLETA" && section.code === "F_REPRESENTACION_SENATORIAL";
-      if (!sectionRecords.length && (searchActive || !showEmptyFutureSection)) return "";
 
-      const cards = sectionRecords.map((record) => {
-        const complete = Boolean(record.nombre_completo && record.cedula);
-        const origin = record.es_relacion_ex_oficio
-          ? [record.origen_nivel_estructura, record.origen_estructura_nombre || record.origen_territorio_codigo].filter(Boolean).join(" · ")
-          : "";
-        const comment = record.comentario
-          ? `<p class="record-comment"><strong>Comentario:</strong> ${escapeHtml(record.comentario)}</p>`
-          : "";
-        const editableActionLabel = record.es_ficha_adicional === true && !record.nombre_completo
-          ? "Agregar senador"
-          : "Abrir y editar ficha";
-        const action = record.es_relacion_ex_oficio
-          ? `<div class="readonly-note">Ficha vinculada automáticamente${origin ? ` desde ${escapeHtml(origin)}` : ""}. No se duplica ni se edita desde Provincia.</div>`
-          : `<button class="button ${canEditSelectedTerritory() ? "" : "ghost"} small open-record" type="button" data-record-id="${escapeHtml(record.id_registro)}">${canEditSelectedTerritory() ? editableActionLabel : "Consultar ficha"}</button>`;
+      if (!sectionRecords.length && searchActive) return "";
+      if (!sectionRecords.length) return "";
 
-        return `
-          <article class="record-card provincial-record-card ${record.es_relacion_ex_oficio ? "linked-record" : ""}">
-            <div class="record-card-top">
-              <span class="cargo-number">${String(record.orden_en_seccion || record.orden_cargo || "").padStart(2, "0")}</span>
-              <span class="status-dot ${complete ? "complete" : ""}" title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}"></span>
-            </div>
-            ${record.es_relacion_ex_oficio ? '<span class="relation-badge">Relación ex oficio</span>' : ""}
-            <h4>${escapeHtml(record.cargo)}</h4>
-            <div class="record-person ${record.nombre_completo ? "" : "empty"}">
-              <strong>${escapeHtml(record.nombre_completo || "Pendiente de completar")}</strong>
-              <span>${escapeHtml(record.cedula ? `Cédula: ${formatCedulaDisplay(record.cedula)}` : "Sin cédula registrada")}</span>
-            </div>
-            ${comment}
-            ${action}
-          </article>
-        `;
-      }).join("");
+      const cards =
+        section.code === "F_REPRESENTACION_SENATORIAL"
+          ? renderProvincialElectiveSectionCards(sectionRecords)
+          : sectionRecords.map(renderProvincialRecordCard).join("");
 
       return `
         <div class="provincial-section-heading full-span" data-section-code="${section.code}">
@@ -1691,13 +1924,17 @@ function renderProvincialRecordCards() {
             <h3>${escapeHtml(section.title)}</h3>
             <p>${escapeHtml(section.subtitle)} · ${escapeHtml(section.reference)}</p>
           </div>
-          <span class="provincial-section-count">${sectionRecords.length} ficha${sectionRecords.length === 1 ? "" : "s"}</span>
+          <span class="provincial-section-count">
+            ${sectionRecords.length} ficha${sectionRecords.length === 1 ? "" : "s"}
+          </span>
         </div>
-        ${cards || `<div class="empty-card full-span provincial-empty-section"><strong>Sin fichas activas en esta sección</strong><span>La sección se conserva disponible para futuras incorporaciones.</span></div>`}
+        ${cards}
       `;
     }).join("");
 
-  els.recordsGrid.innerHTML = html || '<div class="empty-card full-span"><strong>No se encontraron fichas</strong><span>Ajuste los filtros o el texto de búsqueda.</span></div>';
+  els.recordsGrid.innerHTML =
+    html ||
+    '<div class="empty-card full-span"><strong>No se encontraron fichas</strong><span>Ajuste los filtros o el texto de búsqueda.</span></div>';
 }
 
 function circunscriptionConformationIncludesSection(sectionCode, conformation) {
@@ -2064,11 +2301,15 @@ function renderProvincialSummary() {
   const records = provincialFilteredRecords(state.records, { forPrint });
   const identifySections = forPrint ? state.provincialPrint.identifySections : true;
   const filterState = provincialFilterState({ forPrint });
-  const conformationLabel = PROVINCIAL_CONFORMATIONS.find((entry) => entry.value === filterState.conformation)?.label || "Estructura provincial completa";
+  const conformationLabel =
+    PROVINCIAL_CONFORMATIONS.find((entry) => entry.value === filterState.conformation)?.label ||
+    "Estructura provincial completa";
 
   els.summaryTitle.textContent = item.estructura_nombre;
   els.summaryContext.textContent = `${records.length} fichas o relaciones · ${conformationLabel}.`;
-  els.summaryHeader.innerHTML = `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong><span>${escapeHtml(contextLine(item))}</span>`;
+  els.summaryHeader.innerHTML =
+    `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong>` +
+    `<span>${escapeHtml(contextLine(item))}</span>`;
 
   const grouped = new Map();
   for (const record of records) {
@@ -2078,10 +2319,10 @@ function renderProvincialSummary() {
 
   const rows = PROVINCIAL_SECTIONS
     .filter((section) => filterState.sections.has(section.code))
-    .filter((section) => circunscriptionConformationIncludesSection(section.code, filterState.conformation))
     .map((section) => {
       const sectionRecords = grouped.get(section.code) || [];
       if (!sectionRecords.length) return "";
+
       const heading = identifySections ? `
         <tr class="summary-section-row provincial-summary-section">
           <td colspan="4">
@@ -2090,23 +2331,35 @@ function renderProvincialSummary() {
           </td>
         </tr>
       ` : "";
+
+      if (section.code === "F_REPRESENTACION_SENATORIAL") {
+        return heading + renderProvincialElectiveSummaryRows(sectionRecords);
+      }
+
       const dataRows = sectionRecords.map((record) => {
         const detail = record.es_relacion_ex_oficio
           ? `Miembro ex oficio · ${record.origen_estructura_nombre || record.origen_territorio_codigo || "estructura de origen"}`
           : record.comentario || "";
+
         return `
           <tr class="${record.es_relacion_ex_oficio ? "zonal-summary-row" : ""}">
             <td>${escapeHtml(record.orden_en_seccion || record.orden_cargo || "")}</td>
-            <td><strong>${escapeHtml(record.cargo)}</strong>${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}</td>
+            <td>
+              <strong>${escapeHtml(record.cargo)}</strong>
+              ${detail ? `<small class="summary-detail">${escapeHtml(detail)}</small>` : ""}
+            </td>
             <td>${escapeHtml(record.nombre_completo || "")}</td>
             <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
           </tr>
         `;
       }).join("");
+
       return heading + dataRows;
     }).join("");
 
-  els.summaryBody.innerHTML = rows || '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
+  els.summaryBody.innerHTML =
+    rows ||
+    '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
 }
 
 function renderCircunscriptionSummary() {
@@ -2290,9 +2543,23 @@ function renderSummary() {
 }
 
 function openRecord(recordId) {
-  const record = state.records.find((item) => item.id_registro === recordId && item.es_relacion_ex_oficio !== true && item.es_relacion_automatica !== true);
+  const record = state.records.find((item) =>
+    item.id_registro === recordId &&
+    item.es_relacion_ex_oficio !== true &&
+    (
+      item.es_relacion_automatica !== true ||
+      (
+        isProvincialStructure() &&
+        item.es_relacion_electiva === true
+      )
+    )
+  );
+
   if (!record) {
-    showMessage("Esta relación se consulta aquí, pero la ficha se mantiene y se edita en su territorio de origen.", "info");
+    showMessage(
+      "Esta relación se consulta aquí, pero no es editable desde este nivel.",
+      "info"
+    );
     return;
   }
   state.selectedRecord = record;
@@ -2330,6 +2597,17 @@ function openRecord(recordId) {
     ["Territorio de origen", record.origen_estructura_nombre || record.origen_territorio_codigo],
     ["Tipo de autoridad", record.tipo_autoridad],
     ["Rol dentro del bloque", record.rol_bloque],
+    ["Edición compartida",
+      isProvincialStructure() && record.es_relacion_electiva === true
+        ? "Provincia ↔ nivel de origen"
+        : null
+    ],
+    ["Cupo habilitado",
+      isProvincialStructure() &&
+      record.tipo_relacion_electiva === "DIPUTADO_CIRCUNSCRIPCION"
+        ? (record.cupo_habilitado === true ? "Sí" : "No")
+        : null
+    ],
     ["Tipo de ficha", record.es_ficha_adicional === true ? "Ficha adicional" : null],
     ["Cargo original preservado",
       isZonalStructure() &&
@@ -2412,6 +2690,10 @@ function openRecord(recordId) {
   if (
     recordEditable &&
     record.subseccion_codigo !== "D1_DIPUTADOS_CIRCUNSCRIPCION" &&
+    (
+      record.es_ficha_adicional !== true ||
+      record.es_relacion_electiva === true
+    ) &&
     cedulaDigits(record.cedula).length === 11
   ) {
     resolveRecordNameByCedula({ silent: true });
@@ -2438,14 +2720,25 @@ async function saveRecord(event) {
 
   try {
     let updateRpc;
-    if (isCircunscriptionStructure()) {
+
+    if (
+      isProvincialStructure() &&
+      state.selectedRecord.es_relacion_electiva === true
+    ) {
+      updateRpc = "sigep_portal_actualizar_representacion_electiva_provincia";
+
+    } else if (isCircunscriptionStructure()) {
       updateRpc = state.selectedRecord.subseccion_codigo === "D1_DIPUTADOS_CIRCUNSCRIPCION"
         ? "sigep_portal_actualizar_diputado_circunscripcion"
         : "sigep_portal_actualizar_ficha_circunscripcion";
+
     } else if (state.selectedRecord.es_ficha_adicional === true) {
       updateRpc = "sigep_portal_actualizar_ficha_adicional";
+
     } else {
-      updateRpc = isProvincialStructure() ? "sigep_portal_actualizar_ficha_provincia" : "sigep_portal_actualizar_ficha";
+      updateRpc = isProvincialStructure()
+        ? "sigep_portal_actualizar_ficha_provincia"
+        : "sigep_portal_actualizar_ficha";
     }
 
     const { data, error } = await supabase.rpc(
@@ -2490,7 +2783,9 @@ async function saveRecord(event) {
       "success"
     );
     showMessage(
-      "El backend validó la cédula, fijó el nombre oficial y registró los cambios.",
+      isProvincialStructure() && state.selectedRecord?.es_relacion_electiva === true
+        ? "La misma ficha física fue actualizada desde Provincia; el cambio se reflejará también en su nivel de origen."
+        : "El backend validó la cédula, fijó el nombre oficial y registró los cambios.",
       "success"
     );
 
@@ -2541,7 +2836,13 @@ function exportSummaryCsv() {
           circunscription ? circunscriptionDisplayCargo(record) : record.cargo,
           record.nombre_completo || "",
           formatCedulaDisplay(record.cedula || ""),
-          (record.es_relacion_ex_oficio || record.es_relacion_automatica) ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION AUTOMATICA") : (record.es_ficha_adicional ? "FICHA ADICIONAL" : (provincial ? "FICHA PROVINCIAL" : "FICHA DE CIRCUNSCRIPCION")),
+          record.es_relacion_electiva === true
+            ? `FICHA VINCULADA · ${record.origen_estructura_nombre || record.origen_territorio_codigo || "NIVEL DE ORIGEN"}`
+            : ((record.es_relacion_ex_oficio || record.es_relacion_automatica)
+                ? (record.origen_estructura_nombre || record.origen_territorio_codigo || "RELACION AUTOMATICA")
+                : (record.es_ficha_adicional
+                    ? "FICHA ADICIONAL"
+                    : (provincial ? "FICHA PROVINCIAL" : "FICHA DE CIRCUNSCRIPCION"))),
           record.periodo_electoral || "",
           record.rol_bloque || "",
           record.comentario || ""
