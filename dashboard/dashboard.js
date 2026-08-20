@@ -1,4 +1,4 @@
-// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0
+// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_1
 
 import {
   supabase,
@@ -6,7 +6,7 @@ import {
   escapeHtml
 } from "../js/client.js";
 
-window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0";
+window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_1";
 
 const PUBLIC_RPC = "sigep_dashboard_publico_resumen_v1";
 const DETAIL_RPC = "sigep_dashboard_detalle_estructura_v1";
@@ -890,6 +890,30 @@ function missingLabel(value) {
   return labels[value] || value;
 }
 
+
+/*
+ * Mantiene en el detalle del Dashboard la misma etiqueta visual
+ * utilizada por las fichas del Portal Territorial.
+ *
+ * IMPORTANTE:
+ * En las Zonas, las 31 posiciones de Z_MIEMBROS conservan físicamente
+ * sus cargos/códigos históricos en base de datos, pero visualmente
+ * corresponden a "Miembro". El Dashboard no debe mostrar el cargo
+ * físico preservado en esa sección.
+ */
+function detailDisplayCargo(row) {
+  const sectionCode = clean(row?.seccion_codigo).toUpperCase();
+
+  if (
+    state.selectedStructure?.nivel === "ZONA" &&
+    sectionCode === "Z_MIEMBROS"
+  ) {
+    return "Miembro";
+  }
+
+  return clean(row?.cargo) || "—";
+}
+
 function detailRowsFiltered() {
   const query = normalizeText(els.detailSearch.value);
   const status = els.detailStatusFilter.value;
@@ -910,7 +934,7 @@ function detailRowsFiltered() {
 
     if (query) {
       const haystack = normalizeText([
-        row.cargo,
+        detailDisplayCargo(row),
         row.nombre_completo,
         row.cedula,
         row.telefono_principal,
@@ -951,7 +975,7 @@ function renderDetailTable() {
     return `
       <tr>
         <td>
-          ${escapeHtml(row.cargo || "—")}
+          ${escapeHtml(detailDisplayCargo(row))}
           ${clean(row.origen) ? `
             <div class="muted-origin">${escapeHtml(row.origen)}</div>
           ` : ""}
