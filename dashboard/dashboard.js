@@ -1,4 +1,4 @@
-// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_3
+// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_4
 
 import {
   supabase,
@@ -6,7 +6,7 @@ import {
   escapeHtml
 } from "../js/client.js";
 
-window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_3";
+window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_4";
 
 const PUBLIC_RPC = "sigep_dashboard_publico_resumen_v1";
 const DETAIL_RPC = "sigep_dashboard_detalle_estructura_v1";
@@ -58,6 +58,13 @@ const els = {
   kpiAverage: document.querySelector("#kpiAverage"),
   kpiQuality: document.querySelector("#kpiQuality"),
   kpiEmpty: document.querySelector("#kpiEmpty"),
+  kpiGlobalLabel: document.querySelector("#kpiGlobalLabel"),
+  kpiAverageLabel: document.querySelector("#kpiAverageLabel"),
+  kpiQualityLabel: document.querySelector("#kpiQualityLabel"),
+  kpiEmptyLabel: document.querySelector("#kpiEmptyLabel"),
+  kpiGlobalNote: document.querySelector("#kpiGlobalNote"),
+  kpiAverageNote: document.querySelector("#kpiAverageNote"),
+  kpiEmptyNote: document.querySelector("#kpiEmptyNote"),
 
   selectedLevelLabel: document.querySelector("#selectedLevelLabel"),
   selectedStructureTitle: document.querySelector("#selectedStructureTitle"),
@@ -535,24 +542,164 @@ function levelSummary(level) {
   );
 }
 
+function contextualKpiScope() {
+  const level = state.selectedLevel;
+  let items = structuresForLevel(level);
+
+  if (level === "PROVINCIA") {
+    return state.selectedStructure ? [state.selectedStructure] : items;
+  }
+
+  /*
+   * Circunscripción, Municipio y Distrito Municipal se seleccionan
+   * como una estructura concreta en el control Territorio.
+   */
+  if (["CIRCUNSCRIPCION", "MUNICIPIO", "DISTRITO MUNICIPAL"].includes(level)) {
+    const selected =
+      state.selectedStructure ||
+      items.find((item) => item.estructura_codigo === state.selectedTerritory);
+
+    return selected ? [selected] : items;
+  }
+
+  /*
+   * Región: los KPI describen las regiones del territorio seleccionado.
+   */
+  if (level === "REGION" && state.selectedTerritory) {
+    return items.filter(
+      (item) => clean(item.territorio_codigo) === state.selectedTerritory
+    );
+  }
+
+  /*
+   * Zona: los KPI describen exactamente el conjunto visible.
+   * Ejemplo Quita Sueño + "Sin región formal" => sus 4 zonas.
+   */
+  if (level === "ZONA") {
+    if (state.selectedTerritory) {
+      items = items.filter(
+        (item) => clean(item.territorio_codigo) === state.selectedTerritory
+      );
+    }
+
+    if (state.selectedRegion !== "") {
+      items = items.filter(
+        (item) => normalizeRegion(item.region) === state.selectedRegion
+      );
+    }
+  }
+
+  return items;
+}
+
+function averageMetric(items, getter) {
+  const values = items
+    .map((item) => Number(getter(item)))
+    .filter((value) => Number.isFinite(value));
+
+  if (!values.length) return null;
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function contextualKpiLabels(items) {
+  const level = state.selectedLevel;
+  const count = items.length;
+
+  if (level === "ZONA") {
+    const regionIsFormal =
+      state.selectedRegion !== "" &&
+      state.selectedRegion !== "0";
+
+    els.kpiGlobalLabel.textContent =
+      regionIsFormal ? "Avance de la región" : "Avance del territorio";
+
+    els.kpiAverageLabel.textContent = "Promedio de sus zonas";
+    els.kpiEmptyLabel.textContent = "Zonas sin información";
+
+    els.kpiGlobalNote.textContent =
+      regionIsFormal
+        ? "Calculado con las zonas de la región seleccionada"
+        : "Calculado con las zonas del territorio seleccionado";
+
+    els.kpiAverageNote.textContent =
+      `${count} zona${count === 1 ? "" : "s"} en el contexto actual`;
+
+    els.kpiEmptyNote.textContent =
+      "Porcentaje de zonas del contexto sin información";
+
+    return;
+  }
+
+  if (level === "REGION") {
+    els.kpiGlobalLabel.textContent = "Avance del territorio";
+    els.kpiAverageLabel.textContent = "Promedio de sus regiones";
+    els.kpiEmptyLabel.textContent = "Regiones sin información";
+    els.kpiGlobalNote.textContent =
+      "Calculado con las regiones del territorio seleccionado";
+    els.kpiAverageNote.textContent =
+      `${count} región${count === 1 ? "" : "es"} en el contexto actual`;
+    els.kpiEmptyNote.textContent =
+      "Porcentaje de regiones del contexto sin información";
+    return;
+  }
+
+  els.kpiGlobalLabel.textContent = "Avance de la estructura";
+  els.kpiAverageLabel.textContent = "Promedio territorial";
+  els.kpiEmptyLabel.textContent = "Estructuras sin información";
+  els.kpiGlobalNote.textContent = "Estructura seleccionada";
+  els.kpiAverageNote.textContent = "Contexto territorial actual";
+  els.kpiEmptyNote.textContent = "Según la selección actual";
+}
+
 function renderLevelKpis() {
-  const summary = levelSummary(state.selectedLevel);
+  const items = contextualKpiScope();
 
-  els.kpiGlobal.textContent = summary
-    ? percent(summary.porcentaje_avance_global)
-    : "—";
+  contextualKpiLabels(items);
 
-  els.kpiAverage.textContent = summary
-    ? percent(summary.porcentaje_promedio_estructuras)
-    : "—";
+  if (!items.length) {
+    els.kpiGlobal.textContent = "—";
+    els.kpiAverage.textContent = "—";
+    els.kpiQuality.textContent = "—";
+    els.kpiEmpty.textContent = "—";
+    return;
+  }
 
-  els.kpiQuality.textContent = summary
-    ? percent(summary.porcentaje_calidad_global)
-    : "—";
+  /*
+   * Dentro de cada nivel territorial SIGEP utilizado en estas
+   * comparaciones, las estructuras del mismo tipo manejan el mismo
+   * denominador operativo (por ejemplo Zona = 45, Región = 21).
+   * Por eso el promedio de sus porcentajes representa correctamente
+   * el contexto visible.
+   */
+  const advance = averageMetric(
+    items,
+    (item) => item.porcentaje_avance
+  );
 
-  els.kpiEmpty.textContent = summary
-    ? percent(summary.porcentaje_estructuras_sin_informacion)
-    : "—";
+  const quality = averageMetric(
+    items,
+    (item) => item?.calidad_datos?.porcentaje_datos_completos
+  );
+
+  const emptyPercent =
+    100 *
+    items.filter(
+      (item) => clampPercent(item.porcentaje_avance) === 0
+    ).length /
+    items.length;
+
+  els.kpiGlobal.textContent =
+    advance == null ? "—" : percent(advance);
+
+  els.kpiAverage.textContent =
+    advance == null ? "—" : percent(advance);
+
+  els.kpiQuality.textContent =
+    quality == null ? "—" : percent(quality);
+
+  els.kpiEmpty.textContent =
+    percent(emptyPercent);
 }
 
 function messageForStructure(item) {

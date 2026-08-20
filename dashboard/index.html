@@ -13,7 +13,7 @@
   >
 
   <link rel="icon" href="../assets/logo-prm.png">
-  <link rel="stylesheet" href="dashboard.css?v=DASHBOARD_TERRITORIAL_V1_0_3">
+  <link rel="stylesheet" href="dashboard.css?v=DASHBOARD_TERRITORIAL_V1_0_4">
 </head>
 
 <body>
@@ -112,30 +112,30 @@
       <section class="kpi-grid" aria-label="Resumen del nivel">
         <article class="metric-card branded-panel">
           <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-          <span class="metric-label">Avance global del nivel</span>
+          <span class="metric-label" id="kpiGlobalLabel">Avance del contexto</span>
           <strong class="metric-value" id="kpiGlobal">—</strong>
-          <span class="metric-note">Ponderado por posiciones operativas</span>
+          <span class="metric-note" id="kpiGlobalNote">Según el filtro territorial actual</span>
         </article>
 
         <article class="metric-card branded-panel">
           <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-          <span class="metric-label">Promedio territorial</span>
+          <span class="metric-label" id="kpiAverageLabel">Promedio territorial</span>
           <strong class="metric-value" id="kpiAverage">—</strong>
-          <span class="metric-note">Promedio entre estructuras</span>
+          <span class="metric-note" id="kpiAverageNote">Promedio entre estructuras visibles</span>
         </article>
 
         <article class="metric-card branded-panel">
           <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-          <span class="metric-label">Calidad completa</span>
+          <span class="metric-label" id="kpiQualityLabel">Calidad completa</span>
           <strong class="metric-value" id="kpiQuality">—</strong>
           <span class="metric-note">Nombre + cédula + teléfono principal</span>
         </article>
 
         <article class="metric-card branded-panel">
           <img class="panel-brand" src="../assets/logo-stdi.png" alt="" aria-hidden="true">
-          <span class="metric-label">Estructuras sin información</span>
+          <span class="metric-label" id="kpiEmptyLabel">Estructuras sin información</span>
           <strong class="metric-value" id="kpiEmpty">—</strong>
-          <span class="metric-note">Porcentaje del nivel seleccionado</span>
+          <span class="metric-note" id="kpiEmptyNote">Según el filtro territorial actual</span>
         </article>
       </section>
 
@@ -388,6 +388,6 @@
   <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
   <script src="../js/config.js"></script>
-  <script type="module" src="dashboard.js?v=DASHBOARD_TERRITORIAL_V1_0_3"></script>
+  <script type="module" src="dashboard.js?v=DASHBOARD_TERRITORIAL_V1_0_4"></script>
 </body>
 </html>
