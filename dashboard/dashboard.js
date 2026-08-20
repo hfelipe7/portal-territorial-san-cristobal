@@ -1,4 +1,4 @@
-// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_1
+// SIGEP PRM SC — DASHBOARD TERRITORIAL BUILD: DASHBOARD_TERRITORIAL_V1_0_3
 
 import {
   supabase,
@@ -6,7 +6,7 @@ import {
   escapeHtml
 } from "../js/client.js";
 
-window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_1";
+window.__SIGEP_DASHBOARD_BUILD__ = "DASHBOARD_TERRITORIAL_V1_0_3";
 
 const PUBLIC_RPC = "sigep_dashboard_publico_resumen_v1";
 const DETAIL_RPC = "sigep_dashboard_detalle_estructura_v1";
@@ -88,7 +88,6 @@ const els = {
 
   sessionChip: document.querySelector("#sessionChip"),
   detailAccessTitle: document.querySelector("#detailAccessTitle"),
-  detailAccessMessage: document.querySelector("#detailAccessMessage"),
   loadDetailButton: document.querySelector("#loadDetailButton"),
   loginLink: document.querySelector("#loginLink"),
   detailWorkspace: document.querySelector("#detailWorkspace"),
@@ -860,9 +859,6 @@ function renderSession() {
     `;
 
     els.detailAccessTitle.textContent = "Detalle operativo disponible";
-    els.detailAccessMessage.textContent =
-      "La consulta se realiza en modo solo lectura y el backend verificará tu permiso de visualización sobre la estructura seleccionada.";
-
     els.loadDetailButton.hidden = false;
     els.loginLink.hidden = true;
   } else {
@@ -872,9 +868,6 @@ function renderSession() {
     `;
 
     els.detailAccessTitle.textContent = "Detalle protegido";
-    els.detailAccessMessage.textContent =
-      "Los porcentajes son públicos. Para consultar cargo, nombre, cédula, teléfono principal y campos faltantes debes iniciar sesión en el Portal Territorial.";
-
     els.loadDetailButton.hidden = true;
     els.loginLink.hidden = false;
   }
@@ -935,9 +928,7 @@ function detailRowsFiltered() {
     if (query) {
       const haystack = normalizeText([
         detailDisplayCargo(row),
-        row.nombre_completo,
-        row.cedula,
-        row.telefono_principal,
+        row.estado_ficha,
         row.origen,
         missingFields.join(" ")
       ].join(" "));
@@ -980,10 +971,6 @@ function renderDetailTable() {
             <div class="muted-origin">${escapeHtml(row.origen)}</div>
           ` : ""}
         </td>
-
-        <td>${escapeHtml(row.nombre_completo || "—")}</td>
-        <td>${escapeHtml(row.cedula || "—")}</td>
-        <td>${escapeHtml(row.telefono_principal || "—")}</td>
 
         <td>
           <span class="row-status ${escapeHtml(status)}">
