@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: USUARIOS_AUTORIZACIONES_APROBACIONES_V1_5
+// SIGEP PRM SC — PORTAL BUILD: ZONAS_45_DIRECCION_MIEMBROS_V1_6
 import {
   supabase,
   appName,
@@ -12,7 +12,7 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "USUARIOS_AUTORIZACIONES_APROBACIONES_V1_5";
+window.__SIGEP_PORTAL_BUILD__ = "ZONAS_45_DIRECCION_MIEMBROS_V1_6";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
 
 const EDITABLE_FIELDS = [
@@ -851,6 +851,18 @@ function isRegionalStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "REGION";
 }
 
+function isZonalStructure(item = state.selectedStructure) {
+  return String(item?.nivel_estructura || "").trim().toUpperCase() === "ZONA";
+}
+
+function zonalVisualOrder(record) {
+  return Number(record?.orden_visible ?? record?.orden_cargo ?? 0);
+}
+
+function zonalDisplayCargo(record) {
+  return record?.cargo_visible || record?.cargo || "";
+}
+
 function isProvincialStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "PROVINCIA";
 }
@@ -1132,7 +1144,15 @@ function regionalVisualOrder(record) {
 function visibleStructureRecords(records = state.records) {
   if (isProvincialStructure()) return provincialFilteredRecords(records);
   if (isCircunscriptionStructure()) return circunscriptionFilteredRecords(records);
+
+  if (isZonalStructure()) {
+    return [...records].sort(
+      (a, b) => zonalVisualOrder(a) - zonalVisualOrder(b)
+    );
+  }
+
   if (!isRegionalStructure()) return records;
+
   return records
     .filter((record) => REGIONAL_CARGO_CODES.has(record.cargo_codigo))
     .sort((a, b) => regionalVisualOrder(a) - regionalVisualOrder(b));
@@ -1477,6 +1497,15 @@ async function selectStructure(structureCode) {
       data = await loadProvincialRecords(structureCode);
     } else if (isCircunscriptionStructure(structure)) {
       data = await loadCircunscriptionRecords(structureCode);
+    } else if (isZonalStructure(structure)) {
+      const result = await supabase
+        .from("v_sigep_zona_fichas")
+        .select("*")
+        .eq("estructura_codigo", structureCode)
+        .order("seccion_orden")
+        .order("orden_visible");
+      if (result.error) throw result.error;
+      data = result.data || [];
     } else {
       const result = await supabase
         .from("v_fichas_portal")
@@ -1506,6 +1535,14 @@ async function selectStructure(structureCode) {
       window.__SIGEP_PROVINCIA_DIAGNOSTICO__
     );
   }
+
+  if (isZonalStructure(structure) && state.records.length !== 45) {
+    console.warn(
+      `SIGEP Zona: se esperaban 45 posiciones operativas y llegaron ${state.records.length}.`,
+      structure.estructura_codigo
+    );
+  }
+
   await loadZonalAuthorities(structure);
   updateProvincialControlsVisibility();
 
@@ -1556,6 +1593,7 @@ function filteredRecords() {
   return baseRecords.filter((record) =>
     [
       record.cargo,
+      record.cargo_visible,
       record.cargo_original,
       record.nombre_completo,
       record.cedula,
@@ -1809,6 +1847,112 @@ function renderCircunscriptionRecordCards() {
   renderCircunscriptionDeputyAdmin();
 }
 
+function renderZonalRecordCards() {
+  const records = filteredRecords();
+  const totalVisible = visibleStructureRecords().length;
+  const searchActive = Boolean(els.recordSearch.value.trim());
+  const canEdit = canEditSelectedTerritory();
+
+  els.cargoToolbarText.textContent =
+    `${records.length} de ${totalVisible} posiciones zonales mostradas · ` +
+    `${canEdit ? "Edición permitida" : "Solo lectura"}. ` +
+    "Modelo vigente: 14 cargos de Dirección Zonal + 31 Miembros = 45 posiciones.";
+
+  const grouped = new Map();
+
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) {
+      grouped.set(record.seccion_codigo, []);
+    }
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const sections = [
+    {
+      code: "Z_DIRECCION_ZONAL",
+      title: "Dirección Zonal",
+      subtitle: "14 cargos de dirección",
+      expected: 14
+    },
+    {
+      code: "Z_MIEMBROS",
+      title: "Miembros",
+      subtitle: "31 miembros",
+      expected: 31
+    }
+  ];
+
+  const html = sections.map((section) => {
+    const sectionRecords = (grouped.get(section.code) || [])
+      .sort((a, b) => zonalVisualOrder(a) - zonalVisualOrder(b));
+
+    if (!sectionRecords.length && searchActive) {
+      return "";
+    }
+
+    const cards = sectionRecords.map((record) => {
+      const complete = Boolean(record.nombre_completo && record.cedula);
+
+      return `
+        <article class="record-card">
+          <div class="record-card-top">
+            <span class="cargo-number">${String(zonalVisualOrder(record)).padStart(2, "0")}</span>
+            <span
+              class="status-dot ${complete ? "complete" : ""}"
+              title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}">
+            </span>
+          </div>
+
+          <h4>${escapeHtml(zonalDisplayCargo(record))}</h4>
+
+          <div class="record-person ${record.nombre_completo ? "" : "empty"}">
+            <strong>${escapeHtml(record.nombre_completo || "Pendiente de completar")}</strong>
+            <span>${escapeHtml(
+              record.cedula
+                ? `Cédula: ${formatCedulaDisplay(record.cedula)}`
+                : "Sin cédula registrada"
+            )}</span>
+          </div>
+
+          <button
+            class="button ${canEdit ? "" : "ghost"} small open-record"
+            type="button"
+            data-record-id="${escapeHtml(record.id_registro)}">
+            ${canEdit ? "Abrir y editar ficha" : "Consultar ficha"}
+          </button>
+        </article>
+      `;
+    }).join("");
+
+    return `
+      <div class="regional-section-heading full-span">
+        <div>
+          <span class="regional-section-kicker">Estructura zonal</span>
+          <h3>${escapeHtml(section.title)}</h3>
+          <p>${escapeHtml(section.subtitle)}</p>
+        </div>
+        <span class="regional-section-badge">
+          ${sectionRecords.length} de ${section.expected}
+        </span>
+      </div>
+
+      ${cards || `
+        <div class="empty-card full-span">
+          <strong>Sin coincidencias en esta sección</strong>
+          <span>Quite o cambie el texto de búsqueda.</span>
+        </div>
+      `}
+    `;
+  }).join("");
+
+  els.recordsGrid.innerHTML = html || `
+    <div class="empty-card full-span">
+      <strong>No se encontraron fichas</strong>
+      <span>Ajuste el texto de búsqueda.</span>
+    </div>
+  `;
+}
+
 function renderRecordCards() {
   if (!state.selectedStructure) {
     els.recordsGrid.innerHTML = '<div class="empty-card full-span"><strong>Seleccione una estructura</strong><span>Luego podrá abrir y editar cada ficha autorizada.</span></div>';
@@ -1822,6 +1966,11 @@ function renderRecordCards() {
   }
   if (isCircunscriptionStructure()) {
     renderCircunscriptionRecordCards();
+    return;
+  }
+
+  if (isZonalStructure()) {
+    renderZonalRecordCards();
     return;
   }
 
@@ -2018,6 +2167,65 @@ function renderCircunscriptionSummary() {
   els.summaryBody.innerHTML = rows || '<tr><td colspan="4" class="loading">No hay fichas en la selección.</td></tr>';
 }
 
+function renderZonalSummary() {
+  const item = state.selectedStructure;
+  const records = visibleStructureRecords();
+
+  els.summaryTitle.textContent = item.estructura_nombre;
+  els.summaryContext.textContent =
+    "45 posiciones operativas · 14 Dirección Zonal + 31 Miembros · vista resumida para revisión o impresión.";
+  els.summaryHeader.innerHTML =
+    `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong>` +
+    `<span>${escapeHtml(contextLine(item))}</span>`;
+
+  const grouped = new Map();
+
+  for (const record of records) {
+    if (!grouped.has(record.seccion_codigo)) {
+      grouped.set(record.seccion_codigo, []);
+    }
+    grouped.get(record.seccion_codigo).push(record);
+  }
+
+  const sections = [
+    {
+      code: "Z_DIRECCION_ZONAL",
+      title: "DIRECCIÓN ZONAL",
+      expected: 14
+    },
+    {
+      code: "Z_MIEMBROS",
+      title: "MIEMBROS",
+      expected: 31
+    }
+  ];
+
+  els.summaryBody.innerHTML = sections.map((section) => {
+    const sectionRecords = (grouped.get(section.code) || [])
+      .sort((a, b) => zonalVisualOrder(a) - zonalVisualOrder(b));
+
+    const heading = `
+      <tr class="summary-section-row">
+        <td colspan="4">
+          <strong>${escapeHtml(section.title)}</strong>
+          <span>${sectionRecords.length} de ${section.expected} posiciones</span>
+        </td>
+      </tr>
+    `;
+
+    const rows = sectionRecords.map((record) => `
+      <tr>
+        <td>${escapeHtml(zonalVisualOrder(record))}</td>
+        <td><strong>${escapeHtml(zonalDisplayCargo(record))}</strong></td>
+        <td>${escapeHtml(record.nombre_completo || "")}</td>
+        <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
+      </tr>
+    `).join("");
+
+    return heading + rows;
+  }).join("");
+}
+
 function renderSummary() {
   const item = state.selectedStructure;
   if (!item) {
@@ -2034,6 +2242,11 @@ function renderSummary() {
   }
   if (isCircunscriptionStructure()) {
     renderCircunscriptionSummary();
+    return;
+  }
+
+  if (isZonalStructure()) {
+    renderZonalSummary();
     return;
   }
 
@@ -2085,7 +2298,9 @@ function openRecord(recordId) {
   state.selectedRecord = record;
   hideLocalMessage(els.recordMessage);
 
-  els.recordModalTitle.textContent = record.cargo;
+  els.recordModalTitle.textContent = isZonalStructure()
+    ? zonalDisplayCargo(record)
+    : record.cargo;
   els.recordModalContext.textContent = contextLine(record);
 
   const protectedFields = [
@@ -2098,15 +2313,38 @@ function openRecord(recordId) {
     ["Zona", record.zona],
     ["Código de recinto", record.codigo_recinto],
     ["Descripción de recinto", record.descripcion_recinto],
-    ["Sección", record.seccion_titulo ? `${record.seccion_letra}. ${record.seccion_titulo}` : null],
+    ["Sección",
+      record.seccion_titulo
+        ? (
+            isZonalStructure()
+              ? record.seccion_titulo
+              : `${record.seccion_letra}. ${record.seccion_titulo}`
+          )
+        : null
+    ],
     ["Subsección", record.subseccion_titulo ? `${record.subseccion_etiqueta || ""} ${record.subseccion_titulo}`.trim() : null],
     ["Base normativa", record.referencia_normativa],
-    ["Cargo", circunscriptionDisplayCargo(record)],
+    ["Cargo", isZonalStructure() ? zonalDisplayCargo(record) : circunscriptionDisplayCargo(record)],
+    ["Posición visible", isZonalStructure() ? record.orden_visible : null],
+    ["Posición física preservada", isZonalStructure() ? record.orden_original : null],
     ["Territorio de origen", record.origen_estructura_nombre || record.origen_territorio_codigo],
     ["Tipo de autoridad", record.tipo_autoridad],
     ["Rol dentro del bloque", record.rol_bloque],
     ["Tipo de ficha", record.es_ficha_adicional === true ? "Ficha adicional" : null],
-    ["Cargo histórico", record.cargo_original && record.cargo_original !== record.cargo ? record.cargo_original : null]
+    ["Cargo original preservado",
+      isZonalStructure() &&
+      record.cargo_original &&
+      record.cargo_original !== zonalDisplayCargo(record)
+        ? record.cargo_original
+        : null
+    ],
+    ["Cargo histórico",
+      !isZonalStructure() &&
+      record.cargo_original &&
+      record.cargo_original !== record.cargo
+        ? record.cargo_original
+        : null
+    ]
   ].filter(([, value]) => value);
 
   els.recordProtectedFields.innerHTML = protectedFields.map(([label, value]) => `
@@ -2279,8 +2517,21 @@ function exportSummaryCsv() {
 
   const provincial = isProvincialStructure();
   const circunscription = isCircunscriptionStructure();
+  const zonal = isZonalStructure();
   const organized = provincial || circunscription;
-  const rows = organized
+
+  const rows = zonal
+    ? [
+        ["SECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA"],
+        ...records.map((record) => [
+          record.seccion_titulo || "",
+          zonalVisualOrder(record),
+          zonalDisplayCargo(record),
+          record.nombre_completo || "",
+          formatCedulaDisplay(record.cedula || "")
+        ])
+      ]
+    : organized
     ? [
         ["SECCION", "SUBSECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA", "ORIGEN", "PERIODO", "ROL BLOQUE", "COMENTARIO"],
         ...records.map((record) => [
