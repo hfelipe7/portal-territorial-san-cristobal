@@ -1,4 +1,4 @@
-// SIGEP PRM SC — PORTAL BUILD: ZONAS45_REP_ELECTIVA_COMPARTIDA_V1_7
+// SIGEP PRM SC — PORTAL BUILD: ZONAS45_A4_SELECTOR_PILOTO_V1_8
 import {
   supabase,
   appName,
@@ -12,8 +12,21 @@ import {
   formatDate
 } from "./client.js";
 
-window.__SIGEP_PORTAL_BUILD__ = "ZONAS45_REP_ELECTIVA_COMPARTIDA_V1_7";
+window.__SIGEP_PORTAL_BUILD__ = "ZONAS45_A4_SELECTOR_PILOTO_V1_8";
 console.info("SIGEP Portal build:", window.__SIGEP_PORTAL_BUILD__);
+
+// Piloto aislado: únicamente Zona A4 · Región 1 · Escuela Básica Sabana Toro.
+// Las demás zonas continúan usando la vista y comportamiento productivos.
+const ZONAL_SELECTOR_PILOT_STRUCTURE =
+  "EST_ZONA_203_MUN_SAN_CRISTOBAL";
+
+const ZONAL_SELECTOR_PILOT_VIEW =
+  "v_sigep_zona_fichas_piloto_v1";
+
+const ZONAL_SELECTOR_PILOT_RPC =
+  "sigep_zona_asignar_cargo_piloto_v1";
+
+let zonalSelectorPilotCatalog = [];
 
 const EDITABLE_FIELDS = [
   ["cedula", "Cédula", "cedula"],
@@ -547,6 +560,29 @@ function installAuthorizationInterface() {
   }
 }
 
+function installZonalSelectorPilotStyles() {
+  if (document.querySelector("#zonal-selector-pilot-styles")) return;
+
+  const style = document.createElement("style");
+  style.id = "zonal-selector-pilot-styles";
+  style.textContent = `
+    .zonal-pilot-card{position:relative}
+    .zonal-pilot-selector-wrap{margin:.75rem 0 .7rem;padding:.7rem;border:1px solid #dbe7f2;border-radius:12px;background:#f8fbff}
+    .zonal-pilot-selector-label{display:block;margin:0 0 .35rem;color:#0b4f8a;font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+    .zonal-pilot-selector-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.5rem;align-items:center}
+    .zonal-pilot-selector{width:100%;min-width:0;padding:.55rem .65rem;border:1px solid #cddbeb;border-radius:9px;background:#fff;font-size:.82rem}
+    .zonal-pilot-selector:disabled{background:#eef2f6;color:#647180}
+    .zonal-pilot-assign{white-space:nowrap}
+    .zonal-pilot-note{display:block;margin-top:.35rem;color:#65717c;font-size:.72rem;line-height:1.35}
+    .zonal-pilot-badge{display:inline-flex;align-items:center;width:max-content;margin:0 0 .4rem;padding:.22rem .48rem;border-radius:999px;background:#e7f3ff;color:#0b4f8a;font-size:.7rem;font-weight:800}
+    @media (max-width:700px){
+      .zonal-pilot-selector-row{grid-template-columns:1fr}
+      .zonal-pilot-assign{width:100%}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function normalizeRpcPayload(value) {
   if (typeof value !== "string") return value;
   try {
@@ -612,6 +648,7 @@ function scopeDisplayName(scope, territoryByCode) {
 installProvincialInterface();
 installCircunscriptionInterface();
 installAuthorizationInterface();
+installZonalSelectorPilotStyles();
 els.appName.textContent = appName;
 
 function showMessage(text, type = "error", duration = 5200) {
@@ -877,12 +914,107 @@ function isZonalStructure(item = state.selectedStructure) {
   return String(item?.nivel_estructura || "").trim().toUpperCase() === "ZONA";
 }
 
+function isZonalSelectorPilot(item = state.selectedStructure) {
+  return (
+    isZonalStructure(item) &&
+    item?.estructura_codigo === ZONAL_SELECTOR_PILOT_STRUCTURE
+  );
+}
+
+// Posición física de la tarjeta. El selector nunca cambia este valor.
+function zonalPhysicalOrder(record) {
+  return Number(
+    record?.posicion_visual_base ??
+    record?.orden_visible ??
+    record?.orden_cargo ??
+    0
+  );
+}
+
+// Se mantiene como alias del orden físico para no alterar la cuadrícula.
 function zonalVisualOrder(record) {
-  return Number(record?.orden_visible ?? record?.orden_cargo ?? 0);
+  return zonalPhysicalOrder(record);
+}
+
+// Número oficial mostrado. Solo A4 usa la clasificación paralela.
+function zonalDisplayNumber(record) {
+  if (isZonalSelectorPilot()) {
+    const officialNumber = Number(record?.numero_ficha_oficial);
+    if (Number.isFinite(officialNumber) && officialNumber > 0) {
+      return officialNumber;
+    }
+  }
+  return zonalPhysicalOrder(record);
 }
 
 function zonalDisplayCargo(record) {
+  if (isZonalSelectorPilot()) {
+    return (
+      record?.cargo_mostrado_piloto ||
+      record?.cargo_selector_nombre ||
+      record?.cargo_visible ||
+      record?.cargo ||
+      ""
+    );
+  }
   return record?.cargo_visible || record?.cargo || "";
+}
+
+function normalizeZonalPilotRecord(record) {
+  return {
+    ...record,
+    seccion_codigo:
+      record?.seccion_codigo_piloto ||
+      record?.seccion_codigo,
+    seccion_titulo:
+      record?.seccion_titulo_piloto ||
+      record?.seccion_titulo,
+    seccion_orden: Number(
+      record?.seccion_orden_piloto ??
+      record?.seccion_orden ??
+      99
+    )
+  };
+}
+
+function zonalPilotAssignedCargoOwners() {
+  const owners = new Map();
+  if (!isZonalSelectorPilot()) return owners;
+
+  for (const record of state.records) {
+    const code = String(record?.cargo_selector_codigo || "").trim();
+    if (code && code !== "MIEMBRO") {
+      owners.set(code, record.id_registro);
+    }
+  }
+
+  return owners;
+}
+
+function zonalPilotSelectorOptions(record) {
+  const owners = zonalPilotAssignedCargoOwners();
+  const currentCode = String(record?.cargo_selector_codigo || "MIEMBRO");
+
+  return zonalSelectorPilotCatalog.map((item) => {
+    const code = String(item.cargo_selector_codigo || "");
+    const owner = owners.get(code);
+    const occupiedByOther =
+      item.repetible !== true &&
+      owner &&
+      owner !== record.id_registro;
+
+    const label = item.numero_ficha == null
+      ? item.cargo_nombre
+      : `${String(item.numero_ficha).padStart(2, "0")} — ${item.cargo_nombre}`;
+
+    return `
+      <option
+        value="${escapeHtml(code)}"
+        ${code === currentCode ? "selected" : ""}
+        ${occupiedByOther ? "disabled" : ""}
+      >${escapeHtml(label)}${occupiedByOther ? " · ocupado" : ""}</option>
+    `;
+  }).join("");
 }
 
 function isProvincialStructure(item = state.selectedStructure) {
@@ -1544,6 +1676,7 @@ async function selectStructure(structureCode) {
   if (!structure) return;
 
   state.selectedStructure = structure;
+  if (!isZonalSelectorPilot(structure)) zonalSelectorPilotCatalog = [];
   if (isProvincialStructure(structure)) resetProvincialFiltersToCompleteView();
   if (isCircunscriptionStructure(structure)) resetCircunscriptionFiltersToCompleteView();
   renderStructureList();
@@ -1557,14 +1690,43 @@ async function selectStructure(structureCode) {
     } else if (isCircunscriptionStructure(structure)) {
       data = await loadCircunscriptionRecords(structureCode);
     } else if (isZonalStructure(structure)) {
-      const result = await supabase
-        .from("v_sigep_zona_fichas")
-        .select("*")
-        .eq("estructura_codigo", structureCode)
-        .order("seccion_orden")
-        .order("orden_visible");
-      if (result.error) throw result.error;
-      data = result.data || [];
+      if (isZonalSelectorPilot(structure)) {
+        const [recordsResult, catalogResult] = await Promise.all([
+          supabase
+            .from(ZONAL_SELECTOR_PILOT_VIEW)
+            .select("*")
+            .eq("estructura_codigo", structureCode)
+            .order("posicion_visual_base"),
+          supabase
+            .from("sigep_zona_cargos_piloto_v1")
+            .select("cargo_selector_codigo,numero_ficha,cargo_nombre,repetible,activo")
+            .eq("activo", true)
+        ]);
+
+        if (recordsResult.error) throw recordsResult.error;
+        if (catalogResult.error) throw catalogResult.error;
+
+        zonalSelectorPilotCatalog = [...(catalogResult.data || [])]
+          .sort((a, b) => {
+            if (a.numero_ficha == null) return 1;
+            if (b.numero_ficha == null) return -1;
+            return Number(a.numero_ficha) - Number(b.numero_ficha);
+          });
+
+        data = (recordsResult.data || []).map(normalizeZonalPilotRecord);
+      } else {
+        zonalSelectorPilotCatalog = [];
+
+        const result = await supabase
+          .from("v_sigep_zona_fichas")
+          .select("*")
+          .eq("estructura_codigo", structureCode)
+          .order("seccion_orden")
+          .order("orden_visible");
+
+        if (result.error) throw result.error;
+        data = result.data || [];
+      }
     } else {
       const result = await supabase
         .from("v_fichas_portal")
@@ -1654,6 +1816,9 @@ function filteredRecords() {
       record.cargo,
       record.cargo_visible,
       record.cargo_original,
+      record.cargo_mostrado_piloto,
+      record.cargo_selector_nombre,
+      record.numero_ficha_oficial,
       record.nombre_completo,
       record.cedula,
       formatCedulaDisplay(record.cedula),
@@ -2089,11 +2254,19 @@ function renderZonalRecordCards() {
   const totalVisible = visibleStructureRecords().length;
   const searchActive = Boolean(els.recordSearch.value.trim());
   const canEdit = canEditSelectedTerritory();
+  const pilotA4 = isZonalSelectorPilot();
 
-  els.cargoToolbarText.textContent =
-    `${records.length} de ${totalVisible} posiciones zonales mostradas · ` +
-    `${canEdit ? "Edición permitida" : "Solo lectura"}. ` +
-    "Modelo vigente: 14 cargos de Dirección Zonal + 31 Miembros = 45 posiciones.";
+  els.cargoToolbarText.textContent = pilotA4
+    ? (
+        `${records.length} de ${totalVisible} posiciones zonales mostradas · ` +
+        `${canEdit ? "Edición permitida" : "Solo lectura"}. ` +
+        "Piloto A4: 12 cargos de Dirección Zonal + 33 fichas clasificables = 45 posiciones."
+      )
+    : (
+        `${records.length} de ${totalVisible} posiciones zonales mostradas · ` +
+        `${canEdit ? "Edición permitida" : "Solo lectura"}. ` +
+        "Modelo vigente: 14 cargos de Dirección Zonal + 31 Miembros = 45 posiciones."
+      );
 
   const grouped = new Map();
 
@@ -2104,20 +2277,35 @@ function renderZonalRecordCards() {
     grouped.get(record.seccion_codigo).push(record);
   }
 
-  const sections = [
-    {
-      code: "Z_DIRECCION_ZONAL",
-      title: "Dirección Zonal",
-      subtitle: "14 cargos de dirección",
-      expected: 14
-    },
-    {
-      code: "Z_MIEMBROS",
-      title: "Miembros",
-      subtitle: "31 miembros",
-      expected: 31
-    }
-  ];
+  const sections = pilotA4
+    ? [
+        {
+          code: "Z_DIRECCION_ZONAL",
+          title: "Dirección Zonal",
+          subtitle: "12 cargos de dirección",
+          expected: 12
+        },
+        {
+          code: "Z_MIEMBROS",
+          title: "Miembros",
+          subtitle: "33 fichas clasificables",
+          expected: 33
+        }
+      ]
+    : [
+        {
+          code: "Z_DIRECCION_ZONAL",
+          title: "Dirección Zonal",
+          subtitle: "14 cargos de dirección",
+          expected: 14
+        },
+        {
+          code: "Z_MIEMBROS",
+          title: "Miembros",
+          subtitle: "31 miembros",
+          expected: 31
+        }
+      ];
 
   const html = sections.map((section) => {
     const sectionRecords = (grouped.get(section.code) || [])
@@ -2129,16 +2317,49 @@ function renderZonalRecordCards() {
 
     const cards = sectionRecords.map((record) => {
       const complete = Boolean(record.nombre_completo && record.cedula);
+      const selectorEnabled =
+        pilotA4 &&
+        record.selector_habilitado === true &&
+        section.code === "Z_MIEMBROS";
+
+      const selector = selectorEnabled
+        ? `
+          <div class="zonal-pilot-selector-wrap no-print">
+            <span class="zonal-pilot-selector-label">Cargo oficial</span>
+            <div class="zonal-pilot-selector-row">
+              <select
+                class="zonal-pilot-selector"
+                data-zonal-pilot-record-id="${escapeHtml(record.id_registro)}"
+                ${canEdit ? "" : "disabled"}
+                aria-label="Seleccionar cargo oficial">
+                ${zonalPilotSelectorOptions(record)}
+              </select>
+              <button
+                class="button small zonal-pilot-assign"
+                type="button"
+                data-zonal-pilot-record-id="${escapeHtml(record.id_registro)}"
+                ${canEdit ? "" : "disabled"}>
+                Asignar
+              </button>
+            </div>
+            <small class="zonal-pilot-note">
+              La persona y sus datos permanecen en esta misma ficha. Solo cambia la clasificación oficial.
+            </small>
+          </div>
+        `
+        : "";
 
       return `
-        <article class="record-card">
+        <article class="record-card ${selectorEnabled ? "zonal-pilot-card" : ""}">
           <div class="record-card-top">
-            <span class="cargo-number">${String(zonalVisualOrder(record)).padStart(2, "0")}</span>
+            <span class="cargo-number">${String(zonalDisplayNumber(record)).padStart(2, "0")}</span>
             <span
               class="status-dot ${complete ? "complete" : ""}"
               title="${complete ? "Datos básicos completos" : "Datos básicos pendientes"}">
             </span>
           </div>
+
+          ${selectorEnabled ? '<span class="zonal-pilot-badge">Clasificación piloto A4</span>' : ""}
 
           <h4>${escapeHtml(zonalDisplayCargo(record))}</h4>
 
@@ -2150,6 +2371,8 @@ function renderZonalRecordCards() {
                 : "Sin cédula registrada"
             )}</span>
           </div>
+
+          ${selector}
 
           <button
             class="button ${canEdit ? "" : "ghost"} small open-record"
@@ -2423,10 +2646,12 @@ function renderCircunscriptionSummary() {
 function renderZonalSummary() {
   const item = state.selectedStructure;
   const records = visibleStructureRecords();
+  const pilotA4 = isZonalSelectorPilot();
 
   els.summaryTitle.textContent = item.estructura_nombre;
-  els.summaryContext.textContent =
-    "45 posiciones operativas · 14 Dirección Zonal + 31 Miembros · vista resumida para revisión o impresión.";
+  els.summaryContext.textContent = pilotA4
+    ? "45 posiciones operativas · 12 Dirección Zonal + 33 fichas clasificables · piloto A4."
+    : "45 posiciones operativas · 14 Dirección Zonal + 31 Miembros · vista resumida para revisión o impresión.";
   els.summaryHeader.innerHTML =
     `<strong>${escapeHtml(item.nivel_estructura)} · ${escapeHtml(item.estructura_nombre)}</strong>` +
     `<span>${escapeHtml(contextLine(item))}</span>`;
@@ -2440,18 +2665,31 @@ function renderZonalSummary() {
     grouped.get(record.seccion_codigo).push(record);
   }
 
-  const sections = [
-    {
-      code: "Z_DIRECCION_ZONAL",
-      title: "DIRECCIÓN ZONAL",
-      expected: 14
-    },
-    {
-      code: "Z_MIEMBROS",
-      title: "MIEMBROS",
-      expected: 31
-    }
-  ];
+  const sections = pilotA4
+    ? [
+        {
+          code: "Z_DIRECCION_ZONAL",
+          title: "DIRECCIÓN ZONAL",
+          expected: 12
+        },
+        {
+          code: "Z_MIEMBROS",
+          title: "MIEMBROS",
+          expected: 33
+        }
+      ]
+    : [
+        {
+          code: "Z_DIRECCION_ZONAL",
+          title: "DIRECCIÓN ZONAL",
+          expected: 14
+        },
+        {
+          code: "Z_MIEMBROS",
+          title: "MIEMBROS",
+          expected: 31
+        }
+      ];
 
   els.summaryBody.innerHTML = sections.map((section) => {
     const sectionRecords = (grouped.get(section.code) || [])
@@ -2468,7 +2706,7 @@ function renderZonalSummary() {
 
     const rows = sectionRecords.map((record) => `
       <tr>
-        <td>${escapeHtml(zonalVisualOrder(record))}</td>
+        <td>${escapeHtml(zonalDisplayNumber(record))}</td>
         <td><strong>${escapeHtml(zonalDisplayCargo(record))}</strong></td>
         <td>${escapeHtml(record.nombre_completo || "")}</td>
         <td>${escapeHtml(formatCedulaDisplay(record.cedula || ""))}</td>
@@ -2592,7 +2830,8 @@ function openRecord(recordId) {
     ["Subsección", record.subseccion_titulo ? `${record.subseccion_etiqueta || ""} ${record.subseccion_titulo}`.trim() : null],
     ["Base normativa", record.referencia_normativa],
     ["Cargo", isZonalStructure() ? zonalDisplayCargo(record) : circunscriptionDisplayCargo(record)],
-    ["Posición visible", isZonalStructure() ? record.orden_visible : null],
+    ["Número de ficha oficial", isZonalSelectorPilot() ? zonalDisplayNumber(record) : null],
+    ["Posición visible", isZonalStructure() ? zonalPhysicalOrder(record) : null],
     ["Posición física preservada", isZonalStructure() ? record.orden_original : null],
     ["Territorio de origen", record.origen_estructura_nombre || record.origen_territorio_codigo],
     ["Tipo de autoridad", record.tipo_autoridad],
@@ -2801,6 +3040,88 @@ async function saveRecord(event) {
   }
 }
 
+async function assignZonalPilotCargo(recordId, cargoCode, button = null) {
+  if (!isZonalSelectorPilot()) {
+    throw new Error("La clasificación piloto solo está habilitada para Zona A4.");
+  }
+
+  if (!canEditSelectedTerritory()) {
+    throw new Error("No tiene permiso para editar esta Zona.");
+  }
+
+  const record = state.records.find((item) => item.id_registro === recordId);
+  if (!record || record.selector_habilitado !== true) {
+    throw new Error("La ficha seleccionada no admite clasificación en este piloto.");
+  }
+
+  const code = String(cargoCode || "").trim().toUpperCase();
+  const catalogItem = zonalSelectorPilotCatalog.find(
+    (item) => String(item.cargo_selector_codigo || "").toUpperCase() === code
+  );
+
+  if (!catalogItem) {
+    throw new Error("Seleccione un cargo válido del catálogo.");
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Asignando…";
+  }
+
+  try {
+    const { data, error } = await supabase.rpc(
+      ZONAL_SELECTOR_PILOT_RPC,
+      {
+        p_id_registro: recordId,
+        p_cargo_selector_codigo: code
+      }
+    );
+
+    if (error) throw error;
+
+    const result = Array.isArray(data) ? data[0] : data;
+    const status = String(result?.estado || "").toUpperCase();
+
+    if (!["OK", "SIN_CAMBIOS"].includes(status)) {
+      throw new Error(result?.mensaje || "El backend no pudo asignar el cargo.");
+    }
+
+    showMessage(
+      status === "SIN_CAMBIOS"
+        ? "La ficha ya tenía ese cargo asignado."
+        : "Cargo oficial asignado. La persona y sus datos permanecen en la misma ficha.",
+      "success",
+      6500
+    );
+
+    const structureCode = state.selectedStructure?.estructura_codigo;
+    if (structureCode === ZONAL_SELECTOR_PILOT_STRUCTURE) {
+      await selectStructure(structureCode);
+    }
+
+    return result;
+  } catch (error) {
+    const message = String(error?.message || "No se pudo asignar el cargo.");
+
+    if (message.includes("CARGO_YA_ASIGNADO")) {
+      throw new Error("Ese cargo ya está asignado a otra ficha de esta Zona.");
+    }
+    if (message.includes("SIN_PERMISO_PARA_EDITAR_ZONA")) {
+      throw new Error("No tiene permiso para editar esta Zona.");
+    }
+    if (message.includes("NUMERO_OFICIAL_OCUPADO_POR_OTRO_CARGO")) {
+      throw new Error("El número oficial está reservado por otro cargo ya clasificado.");
+    }
+
+    throw error;
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = "Asignar";
+    }
+  }
+}
+
 function exportSummaryCsv() {
   const records = isProvincialStructure()
     ? provincialFilteredRecords()
@@ -2820,7 +3141,7 @@ function exportSummaryCsv() {
         ["SECCION", "ORDEN", "CARGO", "NOMBRE COMPLETO", "CEDULA"],
         ...records.map((record) => [
           record.seccion_titulo || "",
-          zonalVisualOrder(record),
+          zonalDisplayNumber(record),
           zonalDisplayCargo(record),
           record.nombre_completo || "",
           formatCedulaDisplay(record.cedula || "")
@@ -4036,6 +4357,26 @@ els.structureList.addEventListener("click", async (event) => {
 });
 
 els.recordsGrid.addEventListener("click", async (event) => {
+  const assignButton = event.target.closest(".zonal-pilot-assign[data-zonal-pilot-record-id]");
+  if (assignButton) {
+    const recordId = assignButton.dataset.zonalPilotRecordId;
+    const selector = els.recordsGrid.querySelector(
+      `.zonal-pilot-selector[data-zonal-pilot-record-id="${CSS.escape(recordId)}"]`
+    );
+
+    if (!selector) {
+      showMessage("No se encontró el selector de esta ficha.");
+      return;
+    }
+
+    try {
+      await assignZonalPilotCargo(recordId, selector.value, assignButton);
+    } catch (error) {
+      showMessage(error.message || "No se pudo asignar el cargo.");
+    }
+    return;
+  }
+
   const recordButton = event.target.closest(".open-record[data-record-id]");
   if (recordButton) {
     openRecord(recordButton.dataset.recordId);
