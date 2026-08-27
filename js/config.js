@@ -5,3 +5,13 @@ window.APP_CONFIG = {
   LOGIN_FUNCTION: "login-territorial",
   ADMIN_FUNCTION: "admin-users"
 };
+
+// SIGEP PRM SC — Acta Zonal de impresión.
+// Carga desacoplada y solo lectura: si este módulo falla, el portal continúa funcionando.
+if (window.location.pathname.toLowerCase().endsWith("/portal.html")) {
+  const loader = document.createElement("script");
+  loader.type = "module";
+  loader.src = "js/zona-impresion.js?v=ACTA_ZONAL_A4_PDF_V2_1";
+  loader.dataset.sigepZonaImpresion = "true";
+  document.head.appendChild(loader);
+}
