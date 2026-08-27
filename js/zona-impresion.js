@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL A4 · PDF VISUAL V2.2
+// SIGEP PRM SC — ACTA ZONAL A4 · PDF VISUAL V2.3
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,7 +6,7 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_A4_PDF_V2_2";
+const BUILD = "ACTA_ZONAL_A4_PDF_V2_3";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
 const RECORDS_TABLE = "registros";
 const SOURCE_W = 1190;
@@ -117,9 +117,15 @@ function isAssignedBeyondTwelve(record) {
   // 13–42: solo cargos realmente seleccionados, nunca una ficha MIEMBRO sin clasificar.
   if (n >= 13 && n <= 42) return code !== "MIEMBRO";
 
-  // 43–45: por seguridad solo se llena si el backend marca una asignación explícita.
-  // Así una ficha física MIEMBRO con datos no aparece por error en el acta.
-  return code === "MIEMBRO" && explicitSelectorAssignment(record);
+  // 43–45: son las tres posiciones oficiales de Miembro.
+  // Una ficha MIEMBRO sin clasificar no trae cargo_selector_codigo; cuando el
+  // selector la asigna oficialmente a 43/44/45 sí queda código MIEMBRO y número oficial.
+  // También aceptamos las banderas explícitas del backend cuando estén disponibles.
+  return code === "MIEMBRO" && (
+    explicitSelectorAssignment(record) ||
+    n !== physicalOrder(record) ||
+    Boolean(record?.cargo_selector_codigo)
+  );
 }
 
 function printableRecordMap(records) {
@@ -347,7 +353,7 @@ function overlayForRecord(pageNo, slotNo, bandEnd, record) {
   if (name) {
     const [x,y,w,h] = geom.name;
     parts.push(
-      `<span class="za-overlay za-name" data-base-font="13.5" style="${rectStyle(x,y,w,h)}">${escapeHtml(name)}</span>`
+      `<span class="za-overlay za-name" data-base-font="19.0" style="${rectStyle(x,y,w,h)}">${escapeHtml(name)}</span>`
     );
   }
 
@@ -359,7 +365,7 @@ function overlayForRecord(pageNo, slotNo, bandEnd, record) {
       const x1 = boundaries[i];
       const x2 = boundaries[i + 1];
       parts.push(
-        `<span class="za-overlay za-digit" data-base-font="12.4" style="${rectStyle(x1,y,x2-x1,h)}">${cedula[i]}</span>`
+        `<span class="za-overlay za-digit" data-base-font="15.2" style="${rectStyle(x1,y,x2-x1,h)}">${cedula[i]}</span>`
       );
     }
   }
@@ -367,7 +373,7 @@ function overlayForRecord(pageNo, slotNo, bandEnd, record) {
   if (phone) {
     const [x,y,w,h] = geom.celular;
     parts.push(
-      `<span class="za-overlay za-phone" data-base-font="12.5" style="${rectStyle(x,y,w,h)}">${phone}</span>`
+      `<span class="za-overlay za-phone" data-base-font="16.2" style="${rectStyle(x,y,w,h)}">${phone}</span>`
     );
   }
 
@@ -405,25 +411,52 @@ function buildDocument(records) {
   return Array.from({ length: PAGE_COUNT }, (_, index) => pageHtml(index + 1, recordMap)).join("");
 }
 
+function pageScale(page) {
+  if (!page) return 1;
+  const rectWidth = Number(page.getBoundingClientRect?.().width || 0);
+  const clientWidth = Number(page.clientWidth || 0);
+  const width = rectWidth > 1 ? rectWidth : clientWidth > 1 ? clientWidth : 0;
+
+  // Nunca devolver 0: cuando Chrome calcula el layout con un panel recién
+  // mostrado/oculto, clientWidth puede ser temporalmente cero y antes dejaba
+  // todos los textos de la superposición en 0px.
+  if (width <= 1) return 1;
+  return width / SOURCE_W;
+}
+
 function applyPageScale(page) {
   if (!page) return;
-  const scale = page.clientWidth / SOURCE_W;
-  page.style.setProperty("--za-scale", String(scale || 1));
+  const scale = pageScale(page);
+  page.style.setProperty("--za-scale", String(scale));
 
   for (const el of page.querySelectorAll(".za-overlay")) {
-    const base = Number(el.dataset.baseFont || 12);
-    el.style.fontSize = `${base * scale}px`;
+    const base = Number(el.dataset.baseFont || 15);
+    el.style.fontSize = `${Math.max(7.5, base * scale)}px`;
+    el.style.opacity = "1";
+    el.style.visibility = "visible";
   }
 
-  // Ajuste adicional del nombre: reduce progresivamente hasta no desbordar.
+  // El nombre debe ocupar el campo de forma legible y reducirse SOLO si
+  // realmente excede el ancho disponible.
   for (const el of page.querySelectorAll(".za-name")) {
-    const base = Number(el.dataset.baseFont || 13.5) * scale;
-    const min = 7.4 * scale;
+    const base = Math.max(12.2, Number(el.dataset.baseFont || 19) * scale);
+    const min = Math.max(8.8, 10.6 * scale);
     let size = base;
     el.style.fontSize = `${size}px`;
-    while (size > min && el.scrollWidth > el.clientWidth - Math.max(2, 4 * scale)) {
-      size -= 0.35 * scale;
+
+    // Si todavía no existe ancho medible (p. ej. un frame de transición),
+    // conservamos el tamaño base y reintentamos en el siguiente frame.
+    if (el.clientWidth <= 2) continue;
+
+    let guard = 0;
+    while (
+      size > min &&
+      el.scrollWidth > el.clientWidth - Math.max(3, 5 * scale) &&
+      guard < 60
+    ) {
+      size -= Math.max(0.25, 0.35 * scale);
       el.style.fontSize = `${size}px`;
+      guard += 1;
     }
   }
 }
@@ -545,15 +578,16 @@ function installStyles() {
     #zona-acta-status[data-type="success"]{background:#eaf7ef;color:#17633c}
     #zona-acta-status[data-type="warning"]{background:#fff7df;color:#755300}
     #zona-acta-status[data-type="error"]{background:#fff0f0;color:#8b2626}
-    #zona-acta-pages{display:grid;gap:22px;justify-content:center;overflow:auto;padding:.25rem 0 1rem}
-    .za-pdf-page{position:relative;width:min(210mm,100%);aspect-ratio:210/297;background:#fff;box-shadow:0 5px 20px rgba(18,39,63,.16);overflow:hidden;flex:none}
-    .za-pdf-page>img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;user-select:none;pointer-events:none}
-    .za-overlay-layer{position:absolute;inset:0;z-index:2;pointer-events:none;font-family:Arial,Helvetica,sans-serif;color:#000}
-    .za-overlay{position:absolute;box-sizing:border-box;display:flex;align-items:center;white-space:nowrap;overflow:hidden;line-height:1;font-weight:700;text-rendering:geometricPrecision;-webkit-font-smoothing:antialiased}
-    .za-name{justify-content:flex-start;padding:0 2px;text-transform:uppercase}
-    .za-digit{justify-content:center;text-align:center;font-weight:700}
-    .za-phone{justify-content:center;text-align:center;font-weight:700;letter-spacing:.1px}
-    @media(max-width:900px){#zona-acta-pages{justify-content:start}.zona-acta-toolbar{align-items:flex-start;flex-direction:column}.za-pdf-page{min-width:min(210mm,calc(100vw - 34px))}}
+    #zona-acta-panel.za-active{display:block!important}
+    #zona-acta-pages{display:flex!important;flex-direction:column;align-items:center;gap:22px;width:100%;overflow:visible;padding:.25rem 0 1rem}
+    .za-pdf-page{position:relative;display:block!important;width:210mm;max-width:100%;aspect-ratio:210/297;background:#fff;box-shadow:0 5px 20px rgba(18,39,63,.16);overflow:hidden;flex:0 0 auto;isolation:isolate}
+    .za-pdf-page>img{position:absolute;inset:0;z-index:1;width:100%;height:100%;object-fit:fill;display:block;user-select:none;pointer-events:none}
+    .za-overlay-layer{position:absolute;inset:0;z-index:10!important;display:block!important;opacity:1!important;visibility:visible!important;pointer-events:none;font-family:Arial,Helvetica,sans-serif;color:#000}
+    .za-overlay{position:absolute;z-index:11!important;box-sizing:border-box;display:flex!important;align-items:center;white-space:nowrap;overflow:hidden;line-height:1;font-weight:700;color:#000!important;opacity:1!important;visibility:visible!important;text-rendering:geometricPrecision;-webkit-font-smoothing:antialiased}
+    .za-name{justify-content:flex-start;padding:0 3px;text-transform:uppercase;font-weight:750}
+    .za-digit{justify-content:center;text-align:center;font-weight:800}
+    .za-phone{justify-content:center;text-align:center;font-weight:750;letter-spacing:.15px}
+    @media(max-width:900px){#zona-acta-pages{align-items:flex-start;overflow-x:auto}.zona-acta-toolbar{align-items:flex-start;flex-direction:column}.za-pdf-page{width:min(210mm,calc(100vw - 34px));max-width:none}}
     @media print{
       @page{size:A4;margin:0}
       html,body{background:#fff!important}
@@ -571,7 +605,10 @@ function installStyles() {
       body.zona-acta-print #zona-acta-panel{display:block!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important}
       body.zona-acta-print .portal-layout{display:block!important;max-width:none!important;width:auto!important;margin:0!important;padding:0!important}
       body.zona-acta-print #zona-acta-pages{display:block!important;margin:0!important;padding:0!important;overflow:visible!important}
-      body.zona-acta-print .za-pdf-page{display:block!important;width:210mm!important;height:297mm!important;max-width:none!important;aspect-ratio:auto!important;margin:0!important;padding:0!important;box-shadow:none!important;break-after:page;page-break-after:always}
+      body.zona-acta-print .za-pdf-page{display:block!important;position:relative!important;width:210mm!important;height:297mm!important;max-width:none!important;aspect-ratio:auto!important;margin:0!important;padding:0!important;box-shadow:none!important;overflow:hidden!important;isolation:isolate!important;break-after:page;page-break-after:always;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      body.zona-acta-print .za-pdf-page>img{z-index:1!important}
+      body.zona-acta-print .za-overlay-layer{display:block!important;z-index:50!important;opacity:1!important;visibility:visible!important}
+      body.zona-acta-print .za-overlay{display:flex!important;z-index:51!important;color:#000!important;opacity:1!important;visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
       body.zona-acta-print .za-pdf-page:last-child{break-after:auto;page-break-after:auto}
     }
   `;
@@ -618,9 +655,29 @@ function installInterface() {
   `;
   summaryPanel.insertAdjacentElement("afterend", panel);
 
-  tab.addEventListener("click", async () => {
+  tab.addEventListener("click", async (event) => {
+    // El portal principal fue construido antes de esta pestaña. Evitamos que
+    // su manejador genérico vuelva a ocultar el panel dinámico en escritorio.
+    event.preventDefault();
+    event.stopPropagation();
+
+    for (const button of tabs.querySelectorAll("button")) {
+      button.classList.toggle("active", button === tab);
+    }
+    for (const candidate of document.querySelectorAll(".tab-panel")) {
+      candidate.hidden = candidate !== panel;
+    }
+
     panel.hidden = false;
+    panel.classList.add("za-active");
     await renderCurrentActa({ force: true });
+
+    requestAnimationFrame(() => {
+      panel.hidden = false;
+      panel.classList.add("za-active");
+      applyAllScales();
+      window.setTimeout(applyAllScales, 120);
+    });
   });
 
   tabs.addEventListener("click", (event) => {
@@ -628,6 +685,7 @@ function installInterface() {
     if (!button) return;
     if (button !== tab) {
       panel.hidden = true;
+      panel.classList.remove("za-active");
       tab.classList.remove("active");
     }
   });
@@ -639,10 +697,18 @@ function installInterface() {
       await ensureCompleteActaForPrint();
       showStatus("Documento listo para imprimir · portada + páginas 1–6.", "success");
       document.body.classList.add("zona-acta-print");
-      window.setTimeout(() => {
-        applyAllScales();
-        window.print();
-      }, 160);
+
+      // Dos frames garantizan que Chrome ya haya aplicado el ancho A4 antes
+      // de calcular fuentes y abrir la vista previa de impresión.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          applyAllScales();
+          window.setTimeout(() => {
+            applyAllScales();
+            window.print();
+          }, 120);
+        });
+      });
     } catch (error) {
       console.error("SIGEP Acta Zonal · impresión:", error);
       showStatus(error?.message || "No se pudo preparar el documento completo para impresión.", "error");
@@ -663,6 +729,7 @@ function installInterface() {
 
     if (!eligible) {
       panel.hidden = true;
+      panel.classList.remove("za-active");
       state.structureCode = "";
       state.records = [];
       const pages = panel.querySelector("#zona-acta-pages");
