@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.4
+// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.4.1
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,7 +6,7 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_PDF_V2_4_ALL_ZONES";
+const BUILD = "ACTA_ZONAL_PDF_V2_4_1_BAND_FIX";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
 const RECORDS_TABLE = "registros";
 const SOURCE_W = 1190;
@@ -169,6 +169,7 @@ function currentZonaFieldLabel() {
   // para que quede como: A4 - REGIÓN 1 - ESCUELA BÁSICA SABANA TORO.
   return label
     .replace(/^\s*Zona\s+/i, "")
+    .replace(/\s*[·•|]\s*/g, " - ")
     .replace(/\s+/g, " ")
     .trim()
     .toUpperCase();
@@ -407,10 +408,12 @@ function committeeBandOverlay() {
 
   // Campo blanco de la franja "COMITÉ ZONAL" en la página 1 del acta
   // (segunda hoja total, porque la portada es la primera imagen).
-  const x = 306;
-  const y = 216;
-  const w = 746;
-  const h = 34;
+  // Coordenadas exactas del campo BLANCO a la derecha de "COMITÉ ZONAL:".
+  // Mantener este bloque independiente de la geometría de Nombre/Cédula/Celular.
+  const x = 271;
+  const y = 329;
+  const w = 820;
+  const h = 35;
   return `<span class="za-overlay za-committee" data-base-font="17.4" style="${rectStyle(x,y,w,h)}">${escapeHtml(text)}</span>`;
 }
 
@@ -463,6 +466,23 @@ function applyPageScale(page) {
     el.style.fontSize = `${Math.max(7.5, base * scale)}px`;
     el.style.opacity = "1";
     el.style.visibility = "visible";
+  }
+
+  // La identificación de la zona usa todo el campo blanco de COMITÉ ZONAL
+  // y reduce su tamaño solo si un recinto excepcionalmente largo lo requiere.
+  for (const el of page.querySelectorAll(".za-committee")) {
+    const base = Math.max(11.5, Number(el.dataset.baseFont || 17.4) * scale);
+    const min = Math.max(8.2, 9.4 * scale);
+    let size = base;
+    el.style.fontSize = `${size}px`;
+    if (el.clientWidth > 2) {
+      let guard = 0;
+      while (size > min && el.scrollWidth > el.clientWidth - Math.max(6, 8 * scale) && guard < 50) {
+        size -= Math.max(0.2, 0.3 * scale);
+        el.style.fontSize = `${size}px`;
+        guard += 1;
+      }
+    }
   }
 
   // El nombre debe ocupar el campo de forma legible y reducirse SOLO si
