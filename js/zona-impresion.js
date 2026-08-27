@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL A4 · PDF VISUAL V2.1
+// SIGEP PRM SC — ACTA ZONAL A4 · PDF VISUAL V2.2
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,8 +6,9 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_A4_PDF_V2_1";
+const BUILD = "ACTA_ZONAL_A4_PDF_V2_2";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
+const RECORDS_TABLE = "registros";
 const SOURCE_W = 1190;
 const SOURCE_H = 1684;
 const PAGE_COUNT = 7; // portada + páginas 1–6 del acta
@@ -167,15 +168,148 @@ function isCurrentZonaA4SanCristobal() {
   return zoneMatch && municipalityMatch;
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function recordIdentityCandidates(record) {
+  return [
+    record?.registro_id,
+    record?.registro_uuid,
+    record?.ficha_id,
+    record?.id
+  ]
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
+    .map((value) => String(value));
+}
+
+function recordName(record) {
+  return String(firstNonEmpty(
+    record?.nombre_completo,
+    record?.nombre,
+    record?.nombres_apellidos,
+    record?.nombre_y_apellidos
+  ) || "").trim();
+}
+
+function recordCedula(record) {
+  return String(firstNonEmpty(
+    record?.cedula,
+    record?.cedula_persona,
+    record?.documento_identidad
+  ) || "").trim();
+}
+
+function recordPhone(record) {
+  return String(firstNonEmpty(
+    record?.telefono_celular,
+    record?.celular,
+    record?.telefono,
+    record?.telefono_1
+  ) || "").trim();
+}
+
+function hydrateClassificationRows(classifiedRows, personalRows) {
+  const byId = new Map();
+  const byPhysical = new Map();
+
+  for (const row of personalRows || []) {
+    for (const key of recordIdentityCandidates(row)) {
+      if (!byId.has(key)) byId.set(key, row);
+    }
+
+    const pos = Number(
+      row?.posicion_visual_base ??
+      row?.orden_visible ??
+      row?.orden_cargo ??
+      0
+    );
+    if (Number.isFinite(pos) && pos > 0 && !byPhysical.has(pos)) {
+      byPhysical.set(pos, row);
+    }
+  }
+
+  return (classifiedRows || []).map((classified) => {
+    let personal = null;
+
+    for (const key of recordIdentityCandidates(classified)) {
+      if (byId.has(key)) {
+        personal = byId.get(key);
+        break;
+      }
+    }
+
+    if (!personal) {
+      const pos = physicalOrder(classified);
+      if (pos > 0) personal = byPhysical.get(pos) || null;
+    }
+
+    if (!personal) return classified;
+
+    // La clasificación oficial manda. Los datos personales se hidratan desde
+    // la ficha real sin escribir ni transformar nada en la base.
+    return {
+      ...personal,
+      ...classified,
+      nombre_completo: firstNonEmpty(
+        personal?.nombre_completo,
+        classified?.nombre_completo,
+        personal?.nombre,
+        classified?.nombre
+      ),
+      cedula: firstNonEmpty(
+        personal?.cedula,
+        classified?.cedula,
+        personal?.cedula_persona,
+        classified?.cedula_persona
+      ),
+      telefono_celular: firstNonEmpty(
+        personal?.telefono_celular,
+        classified?.telefono_celular,
+        personal?.celular,
+        classified?.celular,
+        personal?.telefono,
+        classified?.telefono
+      )
+    };
+  });
+}
+
 async function loadRecords(structureCode) {
-  const { data, error } = await supabase
+  // 1) Lee la vista de clasificación oficial (número/cargo resultante del selector).
+  const classifiedQuery = await supabase
     .from(ZONAL_VIEW)
     .select("*")
     .eq("estructura_codigo", structureCode)
     .order("posicion_visual_base");
 
-  if (error) throw error;
-  return data || [];
+  if (classifiedQuery.error) throw classifiedQuery.error;
+  const classifiedRows = classifiedQuery.data || [];
+
+  // 2) Hidrata Nombre/Cédula/Celular desde las fichas reales.
+  // Es una lectura adicional; no ejecuta INSERT/UPDATE/DELETE/RPC.
+  const personalQuery = await supabase
+    .from(RECORDS_TABLE)
+    .select("*")
+    .eq("estructura_codigo", structureCode);
+
+  if (personalQuery.error) {
+    // Si por política RLS la tabla base no está accesible directamente,
+    // seguimos con la vista; los alias tolerantes de overlayForRecord aún
+    // permiten usar datos personales si la vista ya los expone.
+    console.warn(
+      "SIGEP Acta Zonal: no fue posible hidratar desde registros; se usará la vista clasificada.",
+      personalQuery.error
+    );
+    return classifiedRows;
+  }
+
+  return hydrateClassificationRows(classifiedRows, personalQuery.data || []);
 }
 
 function pct(value, total) {
@@ -204,9 +338,9 @@ function overlayForRecord(pageNo, slotNo, bandEnd, record) {
   if (!record) return "";
 
   const geom = slotGeometry(pageNo, slotNo, bandEnd);
-  const name = String(record?.nombre_completo || "").trim();
-  const cedula = digits(record?.cedula);
-  const phone = formatPhone(record?.telefono_celular);
+  const name = recordName(record);
+  const cedula = digits(recordCedula(record));
+  const phone = formatPhone(recordPhone(record));
 
   const parts = [];
 
@@ -369,7 +503,7 @@ async function renderCurrentActa({ force = false } = {}) {
     const printable = printableRecordMap(rows);
     const extras = [...printable.keys()].filter((n) => n >= 13).length;
     const invalidCedulas = [...printable.values()].filter((r) => {
-      const d = digits(r?.cedula);
+      const d = digits(recordCedula(r));
       return d && d.length !== 11;
     }).length;
 
@@ -378,7 +512,14 @@ async function renderCurrentActa({ force = false } = {}) {
       window.setTimeout(applyAllScales, 80);
     });
 
-    let message = `Acta actualizada · 12 cargos base + ${extras} cargo${extras === 1 ? "" : "s"} asignado${extras === 1 ? "" : "s"}.`;
+    const printableValues = [...printable.values()];
+    const namesReady = printableValues.filter((r) => recordName(r)).length;
+    const phonesReady = printableValues.filter((r) => formatPhone(recordPhone(r))).length;
+
+    let message = `Acta actualizada · 12 cargos base + ${extras} cargo${extras === 1 ? "" : "s"} asignado${extras === 1 ? "" : "s"} · ${namesReady} nombre${namesReady === 1 ? "" : "s"} listo${namesReady === 1 ? "" : "s"} para imprimir.`;
+    if (phonesReady) {
+      message += ` ${phonesReady} celular${phonesReady === 1 ? "" : "es"} disponible${phonesReady === 1 ? "" : "s"}.`;
+    }
     if (invalidCedulas) {
       message += ` ${invalidCedulas} cédula${invalidCedulas === 1 ? "" : "s"} no se imprimió por no tener 11 dígitos.`;
     }
