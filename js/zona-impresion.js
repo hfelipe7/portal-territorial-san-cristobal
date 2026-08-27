@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.4.1
+// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.5
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,9 +6,8 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_PDF_V2_4_1_BAND_FIX";
+const BUILD = "ACTA_ZONAL_PDF_V2_5_IDENTITY_SAFE";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
-const RECORDS_TABLE = "registros";
 const SOURCE_W = 1190;
 const SOURCE_H = 1684;
 const PAGE_COUNT = 7; // portada + páginas 1–6 del acta
@@ -196,139 +195,77 @@ function firstNonEmpty(...values) {
   return "";
 }
 
-function recordIdentityCandidates(record) {
-  return [
-    record?.registro_id,
-    record?.registro_uuid,
-    record?.ficha_id,
-    record?.id
-  ]
-    .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
-    .map((value) => String(value));
-}
+function auditClassifiedRows(rows, structureCode) {
+  const list = Array.isArray(rows) ? rows : [];
 
-function recordName(record) {
-  return String(firstNonEmpty(
-    record?.nombre_completo,
-    record?.nombre,
-    record?.nombres_apellidos,
-    record?.nombre_y_apellidos
-  ) || "").trim();
-}
-
-function recordCedula(record) {
-  return String(firstNonEmpty(
-    record?.cedula,
-    record?.cedula_persona,
-    record?.documento_identidad
-  ) || "").trim();
-}
-
-function recordPhone(record) {
-  return String(firstNonEmpty(
-    record?.telefono_celular,
-    record?.celular,
-    record?.telefono,
-    record?.telefono_1
-  ) || "").trim();
-}
-
-function hydrateClassificationRows(classifiedRows, personalRows) {
-  const byId = new Map();
-  const byPhysical = new Map();
-
-  for (const row of personalRows || []) {
-    for (const key of recordIdentityCandidates(row)) {
-      if (!byId.has(key)) byId.set(key, row);
-    }
-
-    const pos = Number(
-      row?.posicion_visual_base ??
-      row?.orden_visible ??
-      row?.orden_cargo ??
-      0
+  // La vista oficial tiene por contrato 45 filas por Zona: 12 Dirección + 33 clasificables.
+  if (list.length !== 45) {
+    throw new Error(
+      `ACTA_ZONAL_INTEGRIDAD: ${structureCode} devolvió ${list.length} fichas; se esperaban 45.`
     );
-    if (Number.isFinite(pos) && pos > 0 && !byPhysical.has(pos)) {
-      byPhysical.set(pos, row);
-    }
   }
 
-  return (classifiedRows || []).map((classified) => {
-    let personal = null;
+  const ids = new Set();
+  const physicalPositions = new Set();
+  const officialNumbers = new Set();
 
-    for (const key of recordIdentityCandidates(classified)) {
-      if (byId.has(key)) {
-        personal = byId.get(key);
-        break;
-      }
+  for (const row of list) {
+    const id = String(row?.id_registro || "").trim();
+    if (!id) {
+      throw new Error("ACTA_ZONAL_INTEGRIDAD: se recibió una ficha sin id_registro.");
     }
-
-    if (!personal) {
-      const pos = physicalOrder(classified);
-      if (pos > 0) personal = byPhysical.get(pos) || null;
+    if (ids.has(id)) {
+      throw new Error(`ACTA_ZONAL_INTEGRIDAD: id_registro duplicado ${id}.`);
     }
+    ids.add(id);
 
-    if (!personal) return classified;
+    const physical = physicalOrder(row);
+    if (!Number.isInteger(physical) || physical < 1 || physical > 45) {
+      throw new Error(
+        `ACTA_ZONAL_INTEGRIDAD: posición física inválida para ${id}: ${physical}.`
+      );
+    }
+    if (physicalPositions.has(physical)) {
+      throw new Error(
+        `ACTA_ZONAL_INTEGRIDAD: posición física duplicada ${physical}.`
+      );
+    }
+    physicalPositions.add(physical);
 
-    // La clasificación oficial manda. Los datos personales se hidratan desde
-    // la ficha real sin escribir ni transformar nada en la base.
-    return {
-      ...personal,
-      ...classified,
-      nombre_completo: firstNonEmpty(
-        personal?.nombre_completo,
-        classified?.nombre_completo,
-        personal?.nombre,
-        classified?.nombre
-      ),
-      cedula: firstNonEmpty(
-        personal?.cedula,
-        classified?.cedula,
-        personal?.cedula_persona,
-        classified?.cedula_persona
-      ),
-      telefono_celular: firstNonEmpty(
-        personal?.telefono_celular,
-        classified?.telefono_celular,
-        personal?.celular,
-        classified?.celular,
-        personal?.telefono,
-        classified?.telefono
-      )
-    };
-  });
+    const official = officialNumber(row);
+    if (!Number.isInteger(official) || official < 1 || official > 45) {
+      throw new Error(
+        `ACTA_ZONAL_INTEGRIDAD: número oficial inválido para ${id}: ${official}.`
+      );
+    }
+    if (officialNumbers.has(official)) {
+      throw new Error(
+        `ACTA_ZONAL_INTEGRIDAD: número oficial duplicado ${official}.`
+      );
+    }
+    officialNumbers.add(official);
+  }
+
+  return list;
 }
 
 async function loadRecords(structureCode) {
-  // 1) Lee la vista de clasificación oficial (número/cargo resultante del selector).
-  const classifiedQuery = await supabase
+  // FUENTE ÚNICA DE VERDAD PARA EL ACTA:
+  // v_sigep_zona_fichas_clasificadas_v1 ya contiene z.* (la ficha y sus datos)
+  // y la clasificación oficial unida POR id_registro.
+  //
+  // No se hace una segunda consulta a `registros` y, especialmente, nunca se
+  // vuelve a emparejar una persona por posición física. Así la persona sigue
+  // unida a su misma ficha aunque el selector intercambie números oficiales.
+  const { data, error } = await supabase
     .from(ZONAL_VIEW)
     .select("*")
     .eq("estructura_codigo", structureCode)
     .order("posicion_visual_base");
 
-  if (classifiedQuery.error) throw classifiedQuery.error;
-  const classifiedRows = classifiedQuery.data || [];
+  if (error) throw error;
 
-  // 2) Hidrata Nombre/Cédula/Celular desde las fichas reales.
-  // Es una lectura adicional; no ejecuta INSERT/UPDATE/DELETE/RPC.
-  const personalQuery = await supabase
-    .from(RECORDS_TABLE)
-    .select("*")
-    .eq("estructura_codigo", structureCode);
-
-  if (personalQuery.error) {
-    // Si por política RLS la tabla base no está accesible directamente,
-    // seguimos con la vista; los alias tolerantes de overlayForRecord aún
-    // permiten usar datos personales si la vista ya los expone.
-    console.warn(
-      "SIGEP Acta Zonal: no fue posible hidratar desde registros; se usará la vista clasificada.",
-      personalQuery.error
-    );
-    return classifiedRows;
-  }
-
-  return hydrateClassificationRows(classifiedRows, personalQuery.data || []);
+  return auditClassifiedRows(data || [], structureCode);
 }
 
 function pct(value, total) {
@@ -598,7 +535,7 @@ async function renderCurrentActa({ force = false } = {}) {
     const namesReady = printableValues.filter((r) => recordName(r)).length;
     const phonesReady = printableValues.filter((r) => formatPhone(recordPhone(r))).length;
 
-    let message = `Acta actualizada · 12 cargos base + ${extras} cargo${extras === 1 ? "" : "s"} asignado${extras === 1 ? "" : "s"} · ${namesReady} nombre${namesReady === 1 ? "" : "s"} listo${namesReady === 1 ? "" : "s"} para imprimir.`;
+    let message = `Acta actualizada · 12 cargos base + ${extras} cargo${extras === 1 ? "" : "s"} asignado${extras === 1 ? "" : "s"} · ${namesReady} nombre${namesReady === 1 ? "" : "s"} listo${namesReady === 1 ? "" : "s"} para imprimir · vinculación por ficha verificada.`;
     if (phonesReady) {
       message += ` ${phonesReady} celular${phonesReady === 1 ? "" : "es"} disponible${phonesReady === 1 ? "" : "s"}.`;
     }
