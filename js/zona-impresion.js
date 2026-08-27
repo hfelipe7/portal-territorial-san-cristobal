@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL A4 · PDF VISUAL V2.3
+// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.4
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,7 +6,7 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_A4_PDF_V2_3";
+const BUILD = "ACTA_ZONAL_PDF_V2_4_ALL_ZONES";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
 const RECORDS_TABLE = "registros";
 const SOURCE_W = 1190;
@@ -160,18 +160,30 @@ function currentStructureCode() {
 function currentStructureLabel() {
   const active = activeStructureButton();
   const strong = active?.querySelector("strong")?.textContent?.trim();
-  return strong || active?.textContent?.trim() || "Zona A4";
+  return strong || active?.textContent?.trim() || "Zona";
 }
 
-function isCurrentZonaA4SanCristobal() {
+function currentZonaFieldLabel() {
+  const label = currentStructureLabel();
+  // En la franja "COMITÉ ZONAL" se imprime sin la palabra inicial "Zona"
+  // para que quede como: A4 - REGIÓN 1 - ESCUELA BÁSICA SABANA TORO.
+  return label
+    .replace(/^\s*Zona\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function isCurrentZonaStructure() {
   const active = activeStructureButton();
   if (!active) return false;
 
   const activeText = normalizeText(active.textContent);
+  const strongText = normalizeText(active?.querySelector("strong")?.textContent);
   const headerText = normalizeText(document.querySelector("#territorial-header")?.textContent);
-  const zoneMatch = /\bZONA\s*A4\b/.test(activeText) || /\bZONA\s*:?\s*A4\b/.test(headerText);
-  const municipalityMatch = /MUNICIPIO\s*:?\s*SAN CRISTOBAL\b/.test(headerText);
-  return zoneMatch && municipalityMatch;
+
+  // Solo mostrar la pestaña para estructuras de nivel ZONA.
+  return /\bZONA\b/.test(activeText) || /\bZONA\b/.test(strongText) || /\bZONA\b/.test(headerText);
 }
 
 function firstNonEmpty(...values) {
@@ -389,6 +401,19 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function committeeBandOverlay() {
+  const text = currentZonaFieldLabel();
+  if (!text) return "";
+
+  // Campo blanco de la franja "COMITÉ ZONAL" en la página 1 del acta
+  // (segunda hoja total, porque la portada es la primera imagen).
+  const x = 306;
+  const y = 216;
+  const w = 746;
+  const h = 34;
+  return `<span class="za-overlay za-committee" data-base-font="17.4" style="${rectStyle(x,y,w,h)}">${escapeHtml(text)}</span>`;
+}
+
 function pageHtml(pageNo, recordMap) {
   let overlays = "";
   const geometry = PAGE_GEOMETRY[pageNo];
@@ -396,6 +421,10 @@ function pageHtml(pageNo, recordMap) {
     overlays = geometry.slots
       .map(([slotNo, bandEnd]) => overlayForRecord(pageNo, slotNo, bandEnd, recordMap.get(slotNo)))
       .join("");
+  }
+
+  if (pageNo === 2) {
+    overlays = `${committeeBandOverlay()}${overlays}`;
   }
 
   return `
@@ -511,7 +540,7 @@ function updateToolbarStructureName() {
 }
 
 async function renderCurrentActa({ force = false } = {}) {
-  if (!isCurrentZonaA4SanCristobal()) return;
+  if (!isCurrentZonaStructure()) return;
   const code = currentStructureCode();
   const pages = document.querySelector("#zona-acta-pages");
   if (!code || !pages || state.rendering) return;
@@ -525,7 +554,7 @@ async function renderCurrentActa({ force = false } = {}) {
   }
 
   state.rendering = true;
-  showStatus("Cargando datos actuales de la Zona A4…", "info");
+  showStatus(`Cargando datos actuales de ${currentStructureLabel()}…`, "info");
 
   try {
     const rows = await loadRecords(code);
@@ -585,6 +614,7 @@ function installStyles() {
     .za-overlay-layer{position:absolute;inset:0;z-index:10!important;display:block!important;opacity:1!important;visibility:visible!important;pointer-events:none;font-family:Arial,Helvetica,sans-serif;color:#000}
     .za-overlay{position:absolute;z-index:11!important;box-sizing:border-box;display:flex!important;align-items:center;white-space:nowrap;overflow:hidden;line-height:1;font-weight:700;color:#000!important;opacity:1!important;visibility:visible!important;text-rendering:geometricPrecision;-webkit-font-smoothing:antialiased}
     .za-name{justify-content:flex-start;padding:0 3px;text-transform:uppercase;font-weight:750}
+    .za-committee{justify-content:flex-start;padding:0 10px;font-weight:800;letter-spacing:.2px;text-transform:uppercase}
     .za-digit{justify-content:center;text-align:center;font-weight:800}
     .za-phone{justify-content:center;text-align:center;font-weight:750;letter-spacing:.15px}
     @media(max-width:900px){#zona-acta-pages{align-items:flex-start;overflow-x:auto}.zona-acta-toolbar{align-items:flex-start;flex-direction:column}.za-pdf-page{width:min(210mm,calc(100vw - 34px));max-width:none}}
@@ -723,7 +753,7 @@ function installInterface() {
   state.resizeObserver.observe(panel);
 
   const refreshAvailability = () => {
-    const eligible = isCurrentZonaA4SanCristobal();
+    const eligible = isCurrentZonaStructure();
     tab.hidden = !eligible;
     updateToolbarStructureName();
 
