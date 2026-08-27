@@ -11,7 +11,7 @@ window.APP_CONFIG = {
 if (window.location.pathname.toLowerCase().endsWith("/portal.html")) {
   const loader = document.createElement("script");
   loader.type = "module";
-  loader.src = "js/zona-impresion.js?v=ACTA_ZONAL_PDF_V2_5_IDENTITY_SAFE";
+  loader.src = "js/zona-impresion.js?v=ACTA_ZONAL_PDF_V2_5_1_IDENTITY_SAFE";
   loader.dataset.sigepZonaImpresion = "true";
   document.head.appendChild(loader);
 }

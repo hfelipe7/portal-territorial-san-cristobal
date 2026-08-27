@@ -1,4 +1,4 @@
-// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.5
+// SIGEP PRM SC — ACTA ZONAL · PDF VISUAL V2.5.1
 // SOLO LECTURA.
 // Este módulo NO ejecuta INSERT, UPDATE, DELETE ni RPC de escritura.
 // Lee la misma vista zonal utilizada por el portal y superpone únicamente:
@@ -6,7 +6,7 @@
 
 import { supabase } from "./client.js";
 
-const BUILD = "ACTA_ZONAL_PDF_V2_5_IDENTITY_SAFE";
+const BUILD = "ACTA_ZONAL_PDF_V2_5_1_IDENTITY_SAFE";
 const ZONAL_VIEW = "v_sigep_zona_fichas_clasificadas_v1";
 const SOURCE_W = 1190;
 const SOURCE_H = 1684;
@@ -193,6 +193,32 @@ function firstNonEmpty(...values) {
     }
   }
   return "";
+}
+
+function recordName(record) {
+  return String(firstNonEmpty(
+    record?.nombre_completo,
+    record?.nombre,
+    record?.nombres_apellidos,
+    record?.nombre_y_apellidos
+  ) || "").trim();
+}
+
+function recordCedula(record) {
+  return String(firstNonEmpty(
+    record?.cedula,
+    record?.cedula_persona,
+    record?.documento_identidad
+  ) || "").trim();
+}
+
+function recordPhone(record) {
+  return String(firstNonEmpty(
+    record?.telefono_celular,
+    record?.celular,
+    record?.telefono,
+    record?.telefono_1
+  ) || "").trim();
 }
 
 function auditClassifiedRows(rows, structureCode) {
