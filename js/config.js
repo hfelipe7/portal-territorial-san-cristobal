@@ -15,3 +15,13 @@ if (window.location.pathname.toLowerCase().endsWith("/portal.html")) {
   loader.dataset.sigepZonaImpresion = "true";
   document.head.appendChild(loader);
 }
+
+// SIGEP PRM SC — Actas Municipal y Distrital de impresión.
+// Módulo desacoplado y SOLO LECTURA. No modifica portal.js, permisos, RLS ni datos.
+if (window.location.pathname.toLowerCase().endsWith("/portal.html")) {
+  const loader = document.createElement("script");
+  loader.type = "module";
+  loader.src = "js/municipio-distrito-actas.js?v=ACTAS_MUNICIPAL_DISTRITAL_PDF_V1_0_0_IDENTITY_SAFE";
+  loader.dataset.sigepMunicipioDistritoActas = "true";
+  document.head.appendChild(loader);
+}
